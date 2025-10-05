@@ -1,0 +1,129 @@
+// ✅ backend/paystack-webhooks.jsw
+import { ok, serverError, badRequest } from 'wix-http-functions';
+import wixData from 'wix-data';
+import { createHmac } from 'crypto';
+import { getPaystackWebhookSecret, PAYSTACK_CONFIG } from './paystack-config.jsw';
+// CRITICAL: Import handleSubscriptionPayment from paystackUrl.jsw
+import { handleSubscriptionPayment } from './paystackUrl.jsw'; 
+
+// === Helper Functions to Process Specific Events (keep these here as they are) ===
+async function handleSuccessfulTransaction(data) {
+    const transaction = {
+        _id: data.reference, // Use the reference as the primary key
+        user: data.metadata?.userId || null,
+        email: data.customer.email,
+        amount: data.amount / 100,
+        status: "success",
+        paidAt: new Date(),
+        transactionType: data.metadata?.transaction_type || "unknown",
+        notes: "Payment successful"
+    };
+    await wixData.insert("PaystackTransactions", transaction, { suppressAuth: true });
+    console.log(`✅ Logged general successful transaction for: ${transaction.email}`);
+}
+
+async function handleFailedTransaction(data) {
+    const transaction = {
+        _id: data.reference,
+        user: data.metadata?.userId || null,
+        email: data.customer.email,
+        amount: data.amount / 100,
+        status: "failed",
+        paidAt: new Date(),
+        transactionType: data.metadata?.transaction_type || "unknown",
+        notes: "Payment failed"
+    };
+    await wixData.insert("PaystackTransactions", transaction, { suppressAuth: true });
+    console.log(`❌ Logged failed transaction for: ${transaction.email}`);
+}
+
+async function handleDispute(data) {
+    const existingTransaction = await wixData.get("PaystackTransactions", data.reference, { suppressAuth: true });
+    if (existingTransaction) {
+        existingTransaction.disputeStatus = "disputed";
+        existingTransaction.notes += " - DISPUTE CREATED";
+        await wixData.update("PaystackTransactions", existingTransaction, { suppressAuth: true });
+        console.warn(`⚠️ Logged dispute for transaction: ${data.reference}`);
+    }
+}
+
+async function handleSubscriptionDisable(data) {
+    // This part of the code would update the user's profile to reflect a canceled subscription
+    const userEmail = data.customer.email;
+    const profile = await wixData.query("Emergency_Profiles").eq("email", userEmail).find({ suppressAuth: true });
+
+    if (profile.items.length > 0) {
+        const profileData = profile.items[0];
+        profileData.subscriptionActive = false;
+        profileData.planStatus = "disabled";
+        await wixData.update("Emergency_Profiles", profileData, { suppressAuth: true });
+        console.log(`ℹ️ Subscription disabled for user: ${userEmail}`);
+    }
+}
+
+
+// The webhook handler that receives events from Paystack.
+export async function post_paystack(request) {
+    try {
+        // CRITICAL: Get webhook secret from centralized config
+        const secret = await getPaystackWebhookSecret(); 
+        const signature = request.headers["x-paystack-signature"] || request.headers["X-Paystack-Signature"];
+        const rawBody = await request.body.text();
+        
+        // 1. 🔒 Security Check: Verify the request signature
+        const hash = createHmac("sha512", secret).update(rawBody).digest("hex");
+        if (hash !== signature) {
+            console.warn("⚠️ Invalid Paystack signature. Rejecting request.");
+            return badRequest({ body: "Invalid signature" });
+        }
+        
+        const payload = JSON.parse(rawBody);
+        const { event, data } = payload;
+        
+        // 2. 🗄️ Log the raw event for full record-keeping
+        const eventData = {
+            eventType: event,
+            eventTimestamp: new Date(payload.event_timestamp || new Date()), // Robust timestamp handling
+            eventPayload: payload,
+            eventSource: "Paystack"
+        };
+        await wixData.insert("PaystackEvents", eventData, { suppressAuth: true });
+        console.log(`✅ Paystack event logged: ${event}`);
+
+        // 3. 🎯 Process specific events
+        switch (event) {
+            case "charge.success":
+            case "invoice.update": // Often sent after a successful charge on an invoice
+                await handleSuccessfulTransaction(data); // Logs the transaction
+                // CRITICAL: Call handleSubscriptionPayment for any successful charge that might be a subscription payment
+                await handleSubscriptionPayment(data);   // Updates user profile & sends WhatsApp for subscriptions
+                break;
+            case "invoice.payment_failed":
+                await handleFailedTransaction(data);
+                // Optionally add specific handling for subscription payment failures, e.g., send an email/WhatsApp notification
+                // await handleSubscriptionPaymentFailure(data); 
+                break;
+            case "charge.dispute.create":
+                await handleDispute(data);
+                break;
+            case "subscription.disable":
+                await handleSubscriptionDisable(data);
+                break;
+            // CRITICAL: Handle subscription.create webhook to ensure user profile is updated immediately upon subscription creation
+            case "subscription.create":
+                await handleSubscriptionPayment(data); // Updates user profile & sends WhatsApp for new subscriptions
+                break;
+            default:
+                console.log(`ℹ️ Unhandled Paystack event: ${event}. No specific action taken.`);
+                break;
+        }
+
+        // Return a 200 OK response to acknowledge receipt. This prevents Paystack from retrying the webhook.
+        return ok({ body: { success: true } });
+
+    } catch (err) {
+        console.error("❌ Paystack Webhook Error:", err.message);
+        // Return 500 for unhandled errors to signal an issue to Paystack, prompting retries.
+        return serverError({ body: { error: err.message } });
+    }
+}

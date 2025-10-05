@@ -1,0 +1,156 @@
+// ✅ backend/paystack-config.jsw
+// Centralized Paystack configuration management
+import { getSecret } from 'wix-secrets-backend';
+
+// Environment configuration
+// Set to true for production, false for testing
+export const PAYSTACK_CONFIG = {
+    USE_LIVE_MODE: true, // Change this to false for testing
+    
+    // API endpoints
+    API_BASE_URL: "https://api.paystack.co",
+    
+    // Webhook events we handle
+    SUPPORTED_WEBHOOK_EVENTS: [
+        "charge.success",
+        "invoice.update",
+        "invoice.payment_failed", 
+        "charge.dispute.create",
+        "subscription.disable",
+        "subscription.create"
+    ],
+    
+    // Secret key names in Wix Secrets Manager  
+    // Updated to match existing secret names in your system
+    SECRET_KEYS: {
+        LIVE_API_KEY: "Live_Secret_Key",           // Your existing live secret
+        TEST_API_KEY: "PaystackSKTest",           // Your existing test secret
+        WEBHOOK_SECRET: "PAYSTACK_WEBHOOK_SECRET"  // Standard webhook secret
+    },
+    
+    // Currency
+    CURRENCY: "ZAR",
+    
+    // Callback URLs
+    CALLBACK_URLS: {
+        SIGNUP_SUCCESS: "https://www.emergitag.me/signup-success",
+        PAYMENT_SUCCESS: "https://www.emergitag.me/payment-success"
+    }
+};
+
+/**
+ * Get the appropriate Paystack API secret key based on environment
+ * @returns {Promise<string>} The secret key
+ */
+export async function getPaystackSecretKey() {
+    try {
+        const keyName = PAYSTACK_CONFIG.USE_LIVE_MODE 
+            ? PAYSTACK_CONFIG.SECRET_KEYS.LIVE_API_KEY 
+            : PAYSTACK_CONFIG.SECRET_KEYS.TEST_API_KEY;
+            
+        console.log(`🔑 Attempting to load secret: ${keyName} (Live mode: ${PAYSTACK_CONFIG.USE_LIVE_MODE})`);
+        
+        let secretKey = null;
+        
+        // Try the configured secret name first
+        try {
+            secretKey = await getSecret(keyName);
+        } catch (primaryError) {
+            console.warn(`⚠️ Primary secret '${keyName}' not found, trying fallbacks...`);
+            
+            // Fallback secret names based on your existing system
+            const fallbackNames = PAYSTACK_CONFIG.USE_LIVE_MODE 
+                ? ["Live_Secret_Key", "PaystackSKLive", "paystack_live"] 
+                : ["PaystackSKTest", "paystack_test", "PAYSTACK_TEST_KEY"];
+            
+            for (const fallbackName of fallbackNames) {
+                try {
+                    console.log(`🔄 Trying fallback secret: ${fallbackName}`);
+                    secretKey = await getSecret(fallbackName);
+                    if (secretKey) {
+                        console.log(`✅ Found secret using fallback: ${fallbackName}`);
+                        break;
+                    }
+                } catch (fallbackError) {
+                    continue; // Try next fallback
+                }
+            }
+        }
+        
+        if (!secretKey) {
+            const availableSecrets = PAYSTACK_CONFIG.USE_LIVE_MODE 
+                ? "Live_Secret_Key, PaystackSKLive, paystack_live" 
+                : "PaystackSKTest, paystack_test, PAYSTACK_TEST_KEY";
+            throw new Error(`❌ No Paystack secret found. Please set one of: ${availableSecrets} in Wix Secrets Manager`);
+        }
+        
+        console.log(`✅ Successfully loaded Paystack secret for ${PAYSTACK_CONFIG.USE_LIVE_MODE ? 'LIVE' : 'TEST'} mode`);
+        return secretKey;
+    } catch (error) {
+        console.error("❌ Failed to get Paystack secret key:", error.message);
+        throw error;
+    }
+}
+
+/**
+ * Get the Paystack webhook secret key
+ * @returns {Promise<string>} The webhook secret
+ */
+export async function getPaystackWebhookSecret() {
+    try {
+        const webhookSecret = await getSecret(PAYSTACK_CONFIG.SECRET_KEYS.WEBHOOK_SECRET);
+        
+        if (!webhookSecret) {
+            throw new Error(`Paystack webhook secret '${PAYSTACK_CONFIG.SECRET_KEYS.WEBHOOK_SECRET}' not found in Wix Secrets Manager`);
+        }
+        
+        return webhookSecret;
+    } catch (error) {
+        console.error("❌ Failed to get Paystack webhook secret:", error.message);
+        throw error;
+    }
+}
+
+/**
+ * Get current environment mode
+ * @returns {string} 'live' or 'test'
+ */
+export function getEnvironmentMode() {
+    return PAYSTACK_CONFIG.USE_LIVE_MODE ? 'live' : 'test';
+}
+
+/**
+ * Check if we're in live mode
+ * @returns {boolean} True if in live mode
+ */
+export function isLiveMode() {
+    return PAYSTACK_CONFIG.USE_LIVE_MODE;
+}
+
+/**
+ * Get the appropriate callback URL for the given type
+ * @param {string} type - The callback type ('signup' or 'payment')
+ * @returns {string} The callback URL
+ */
+export function getCallbackUrl(type = 'payment') {
+    switch (type) {
+        case 'signup':
+            return PAYSTACK_CONFIG.CALLBACK_URLS.SIGNUP_SUCCESS;
+        case 'payment':
+            return PAYSTACK_CONFIG.CALLBACK_URLS.PAYMENT_SUCCESS;
+        default:
+            return PAYSTACK_CONFIG.CALLBACK_URLS.PAYMENT_SUCCESS;
+    }
+}
+
+/**
+ * Log configuration info (for debugging)
+ */
+export function logConfigInfo() {
+    console.log(`🔧 Paystack Configuration:
+        Environment: ${getEnvironmentMode()}
+        API Base URL: ${PAYSTACK_CONFIG.API_BASE_URL}
+        Currency: ${PAYSTACK_CONFIG.CURRENCY}
+        Supported Events: ${PAYSTACK_CONFIG.SUPPORTED_WEBHOOK_EVENTS.join(', ')}
+    `);
+}

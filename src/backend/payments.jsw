@@ -1,0 +1,92 @@
+// backend/payments.jsw
+import wixData from 'wix-data';
+import wixUsers from 'wix-users';
+import { initTransaction, verifyTransaction } from 'backend/paystack-api';
+import { PAYSTACK_CONFIG } from './paystack-config.jsw';
+import { getPlanByName } from './plan-utils.jsw';
+
+// One-off signup fee (R149.00) — store kobo/cents
+const SIGNUP_AMOUNT = 14900; // R149.00 in kobo
+
+/** Start a one-off signup payment. Returns { authorization_url, reference } */
+export async function startSignupPayment() {
+  const user = wixUsers.currentUser;
+  if (!user.loggedIn) throw new Error("Not logged in");
+
+  const email = await user.getEmail();
+  // Metadata helps you identify the intent in webhook
+  const data = await initTransaction({
+    email,
+    amount: SIGNUP_AMOUNT,
+    metadata: { intent: "signup_fee" }
+  });
+
+  // (Optional) Pre-log pending transaction
+  await wixData.insert("Transactions", {
+    userId: user.id,
+    email,
+    type: "signup_fee",
+    status: "pending",
+    reference: data.reference,
+    amount: SIGNUP_AMOUNT,
+    createdAt: new Date()
+  });
+
+  return { authorization_url: data.authorization_url, reference: data.reference };
+}
+
+/** Start subscription for a plan by name ("Bronze", "Silver", etc.). Returns { authorization_url, reference } */
+export async function startPlanSubscription(planName, isAnnual = false) {
+  const user = wixUsers.currentUser;
+  if (!user.loggedIn) throw new Error("Not logged in");
+
+  const email = await user.getEmail();
+  const plan = await getPlanByName(planName);
+  if (!plan) throw new Error(`Plan not found: ${planName}`);
+
+  const amount = isAnnual ? plan.amountAnnual : plan.amountMonthly;
+  const planCode = isAnnual ? plan.paystackPlanCodeAnnual : plan.paystackPlanCode;
+  const cycle = isAnnual ? "Annual" : "Monthly";
+
+  if (!planCode) {
+    throw new Error(`Plan code not configured for ${planName} (${cycle})`);
+  }
+
+  const data = await initTransaction({
+    email,
+    amount,
+    planCode,
+    metadata: { 
+      intent: "plan_subscription", 
+      planName,
+      cycle,
+      userId: user.id
+    }
+  });
+
+  await wixData.insert("Transactions", {
+    userId: user.id,
+    email,
+    type: "subscription_init",
+    planName,
+    cycle,
+    status: "pending",
+    reference: data.reference,
+    amount: amount,
+    createdAt: new Date()
+  });
+
+  return { authorization_url: data.authorization_url, reference: data.reference };
+}
+
+/** Upgrade to a different plan. Returns { authorization_url, reference } */
+export async function startPlanUpgrade(newPlanName, isAnnual = false) {
+  // For Paystack, upgrades are effectively a new subscription/charge on the new plan.
+  return startPlanSubscription(newPlanName, isAnnual);
+}
+
+/** (Optional) Verify after redirect/callback */
+export async function verifyPaystackReference(reference) {
+  const info = await verifyTransaction(reference);
+  return info; // mirror Paystack verification payload to caller
+}

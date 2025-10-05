@@ -1,0 +1,29 @@
+// backend/paystack.jsw
+import { fetch } from 'wix-fetch';
+import { getPaystackSecretKey, PAYSTACK_CONFIG } from 'backend/paystack-config.jsw';
+import { sendDiscordLog } from 'backend/logger.jsw';
+
+export async function createPaystackPayment(userId, email) {
+    const secretKey = await getPaystackSecretKey();
+    const url = `${PAYSTACK_CONFIG.API_BASE_URL}/transaction/initialize`;
+
+    const payload = {
+        email,
+        amount: 15000, // kobo
+        metadata: { userId, type: "signup" },
+        callback_url: "https://www.emergitag.me/signup-success"
+    };
+
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${secretKey}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+    });
+
+    const result = await response.json();
+    sendDiscordLog("📤 Paystack init: " + JSON.stringify(result));
+    return result.data.authorization_url;
+}

@@ -1,0 +1,177 @@
+import wixData from 'wix-data';
+import { fetch } from 'wix-fetch';
+import wixSecretsBackend from 'wix-secrets-backend';
+
+// Safe crypto import - only load when needed
+let crypto = null;
+async function getCrypto() {
+    if (!crypto) {
+        try {
+            crypto = await import('crypto');
+            return crypto;
+        } catch (err) {
+            console.error('❌ Crypto module not available for Paystack operations:', err.message);
+            throw new Error('Crypto module required for secure Paystack operations');
+        }
+    }
+    return crypto;
+}
+
+/**
+ * Verify a single Paystack transaction by reference
+ */
+export async function verifyPaystackPayment(reference) {
+    try {
+        const { getPaystackSecretKey, PAYSTACK_CONFIG } = await import('./paystack-config.jsw');
+        const secretKey = await getPaystackSecretKey();
+        const url = `${PAYSTACK_CONFIG.API_BASE_URL}/transaction/verify/${reference}`;
+
+        const response = await fetch(url, {
+            method: "GET",
+            headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" }
+        });
+
+        if (!response.ok) throw new Error(`Paystack verify failed: ${response.status}`);
+
+        const result = await response.json();
+        if (!result.status) return { success: false, error: result.message };
+
+        const tx = result.data;
+        if (tx.status === "success") return { success: true, data: tx };
+        else return { success: false, error: tx.gateway_response || "Payment failed", data: tx };
+
+    } catch (err) {
+        console.error("❌ verifyPaystackPayment error:", err);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Upsert Emergency Profile and trigger subscription creation if first payment
+ */
+export async function handleFirstPayment(paystackData) {
+    try {
+        const { customer, reference, metadata } = paystackData;
+        const email = customer?.email;
+        const userId = metadata?.userId;
+        const membershipTier = metadata?.membershipTier || "Bronze";
+        const cycle = metadata?.cycle || "Monthly"; // "Monthly" or "Annual"
+
+        if (!userId) throw new Error("Missing Wix userId in metadata.");
+        if (!email) throw new Error("Customer email missing.");
+
+        // --- Upsert Emergency Profile ---
+        const existing = await wixData.query("Emergency_Profiles")
+            .eq("_owner", userId)
+            .limit(1)
+            .find({ suppressAuth: true });
+
+        // Generate publicViewId safely
+        let publicViewId = existing.items[0]?.publicViewId;
+        if (!publicViewId) {
+            const cryptoModule = await getCrypto();
+            if (cryptoModule && cryptoModule.randomUUID) {
+                publicViewId = cryptoModule.randomUUID();
+            } else {
+                // Fallback UUID generation
+                publicViewId = `emergitag-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            }
+        }
+
+        const profileData = {
+            _owner: userId,
+            userId,
+            emailAddress: email,
+            membershipTier,
+            signUpPaid: true,
+            paystackRef: reference,
+            datePaid: new Date(),
+            publicViewId: publicViewId
+        };
+
+        let profile;
+        if (existing.items.length > 0) {
+            profile = await wixData.update("Emergency_Profiles", { ...existing.items[0], ...profileData }, { suppressAuth: true });
+        } else {
+            profile = await wixData.insert("Emergency_Profiles", profileData, { suppressAuth: true });
+        }
+
+        // --- Create subscription now that card is authorized ---
+        await createPaystackSubscription(profile, membershipTier, cycle);
+
+        return profile;
+
+    } catch (err) {
+        console.error("❌ handleFirstPayment error:", err);
+        throw err;
+    }
+}
+
+/**
+ * Create Paystack subscription using customer code from profile
+ */
+async function createPaystackSubscription(profile, planName, cycle) {
+    try {
+        const { getPaystackSecretKey, PAYSTACK_CONFIG } = await import('./paystack-config.jsw');
+        const secretKey = await getPaystackSecretKey();
+        if (!profile.paystackCustomerCode) {
+            console.warn("⚠️ No Paystack customer code found, creating one...");
+            const customerCode = await createPaystackCustomer(profile, secretKey);
+            profile.paystackCustomerCode = customerCode;
+            await wixData.update("Emergency_Profiles", profile, { suppressAuth: true });
+        }
+
+        // Lookup plan code
+        const planQuery = await wixData.query("PlanOptions").eq("planName", planName).limit(1).find({ suppressAuth: true });
+        if (!planQuery.items.length) throw new Error(`No plan found for tier: ${planName}`);
+        const plan = planQuery.items[0];
+        const planCode = cycle === "Annual" ? plan.paystackPlanCodeAnnual : plan.paystackPlanCode;
+        if (!planCode) throw new Error(`Plan code missing for ${planName} (${cycle})`);
+
+        // --- Create subscription on Paystack ---
+        const subscriptionBody = {
+            customer: profile.paystackCustomerCode,
+            plan: planCode,
+            metadata: { userId: profile.userId, membershipTier: planName, cycle }
+        };
+
+        const response = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/subscription`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify(subscriptionBody)
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.status) throw new Error(result.message || "Paystack subscription creation failed.");
+
+        console.log(`✅ Subscription created for ${profile.emailAddress}: ${planName} (${cycle})`);
+        return result.data;
+
+    } catch (err) {
+        console.error("❌ createPaystackSubscription error:", err);
+        throw err;
+    }
+}
+
+/**
+ * Create Paystack customer for a profile
+ */
+async function createPaystackCustomer(profile, secretKey) {
+    const customerBody = {
+        email: profile.emailAddress,
+        first_name: profile.fullName?.split(" ")[0] || "Member",
+        last_name: profile.fullName?.split(" ").slice(1).join(" ") || "",
+        phone: profile.phone || null
+    };
+
+    const response = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/customer`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify(customerBody)
+    });
+
+    const result = await response.json();
+    if (!response.ok || !result.status) throw new Error(result.message || "Customer creation failed.");
+
+    return result.data.customer_code;
+}

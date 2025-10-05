@@ -1,0 +1,78 @@
+// backend/status.jsw
+import wixData from "wix-data";
+import { fetch } from "wix-fetch";
+
+// === Get Payment Status Across Paystack + PayFast ===
+export async function getUserPaymentStatus(userId, email) {
+  try {
+    let status = {
+      hasSignUpPaid: false,
+      signupSource: null,
+      signupDate: null,
+      signupAmount: null,
+      hasSubscription: false,
+      subscriptionSource: null,
+      membershipTier: null,
+    };
+
+    // --- Check Emergency_Profiles CMS first ---
+    const profileRes = await wixData.query("Emergency_Profiles")
+      .eq("_owner", userId)
+      .limit(1)
+      .find({ suppressAuth: true });
+
+    if (profileRes.items.length > 0) {
+      const profile = profileRes.items[0];
+
+      if (profile.signUpPaid) {
+        status.hasSignUpPaid = true;
+        status.signupSource = profile.payFastPaymentId
+          ? "PayFast"
+          : profile.paystackReference
+          ? "Paystack"
+          : "Unknown";
+        status.signupDate = profile.lastPaymentDate || null;
+        status.signupAmount = 150.0;
+      }
+
+      if (profile.membershipTier) {
+        status.hasSubscription = true;
+        status.subscriptionSource = "CMS";
+        status.membershipTier = profile.membershipTier;
+      }
+    }
+
+    // --- Check PaystackTransactions collection ---
+    const paystack = await wixData.query("PaystackTransactions")
+      .eq("profileOwner", userId)
+      .limit(1)
+      .find({ suppressAuth: true });
+    if (paystack.items.length > 0) {
+      status.hasSignUpPaid = true;
+      status.signupSource = "Paystack";
+      status.signupDate = paystack.items[0].processedAt;
+      status.signupAmount = paystack.items[0].amount || 150.0;
+    }
+
+    // --- Check PayFastTransactions collection ---
+    const payfast = await wixData.query("PayFastTransactions")
+      .eq("profileOwner", userId)
+      .limit(1)
+      .find({ suppressAuth: true });
+    if (payfast.items.length > 0) {
+      status.hasSignUpPaid = true;
+      status.signupSource = "PayFast";
+      status.signupDate = payfast.items[0].processedAt;
+      status.signupAmount = payfast.items[0].amount || 150.0;
+    }
+
+    return status;
+  } catch (err) {
+    console.error("❌ getUserPaymentStatus error:", err);
+    return {
+      hasSignUpPaid: false,
+      hasSubscription: false,
+      error: err.message,
+    };
+  }
+}

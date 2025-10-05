@@ -1,0 +1,208 @@
+// ✅ backend/paystackUrl.jsw
+import { getPaystackSecretKey, getCallbackUrl, PAYSTACK_CONFIG } from './paystack-config.jsw';
+import { fetch } from 'wix-fetch';
+import wixUsersBackend from 'wix-users-backend';
+import wixData from 'wix-data';
+import { sendDiscordAlert } from 'backend/discord-utils.jsw';
+import { getOrCreatePaystackCustomer } from 'backend/paystackUtils.jsw'; // Use your existing helper
+
+// Safe crypto import - only load when needed
+let crypto = null;
+async function getCrypto() {
+    if (!crypto) {
+        try {
+            crypto = await import('crypto');
+            return crypto;
+        } catch (err) {
+            console.warn('Crypto module not available, using fallback:', err.message);
+            return null;
+        }
+    }
+    return crypto;
+}
+
+// ------------------ SIGN-UP FEE (ONCE-OFF) ------------------
+export async function createSignupPayment(userId, email) {
+    try {
+        const secretKey = await getPaystackSecretKey();
+        if (!secretKey) throw new Error("Paystack Secret Key not configured.");
+
+        const amount = 14900; // amount in kobo (R149.00)
+
+        const initBody = {
+            email,
+            amount,
+            currency: PAYSTACK_CONFIG.CURRENCY,
+            metadata: { userId, transaction_type: "signup_fee" },
+            callback_url: getCallbackUrl('signup')
+        };
+
+        const response = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/transaction/initialize`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify(initBody)
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.status) throw new Error(result.message || "Paystack initialization failed.");
+
+        // Save transaction
+        await wixData.insert('PaystackTransactions', {
+            _id: result.data.reference,
+            userId,
+            email,
+            amount: amount / 100,
+            status: 'pending',
+            transactionType: 'signup_fee',
+            createdAt: new Date()
+        }, { suppressAuth: true });
+
+        return result.data.authorization_url;
+
+    } catch (err) {
+        console.error("❌ createSignupPayment error:", err);
+        await sendDiscordAlert(`❌ createSignupPayment error: ${err.message}`);
+        throw err;
+    }
+}
+
+// ------------------ INITIALIZE FIRST PAYMENT ------------------
+export async function createPaystackSubscriptionLink(planName, isAnnual = false, metadata = {}) {
+    try {
+        const currentUser = wixUsersBackend.currentUser;
+        if (!currentUser || !currentUser.id) throw new Error("User not logged in.");
+        const userId = currentUser.id;
+        const email = await currentUser.getEmail();
+
+        const secretKey = await getPaystackSecretKey();
+        if (!secretKey) throw new Error("Paystack Secret Key not configured.");
+
+        // Lookup plan details
+        const planQuery = await wixData.query("PlanOptions").eq("planName", planName).limit(1).find({ suppressAuth: true });
+        if (!planQuery.items.length) throw new Error(`No plan found for tier: ${planName}`);
+        const plan = planQuery.items[0];
+        const amount = isAnnual ? plan.amountAnnual : plan.amountMonthly; // Amount in cents/kobo
+        const cycle = isAnnual ? "Annual" : "Monthly";
+
+        // Initialize Paystack transaction for first payment
+        const initBody = {
+            email,
+            amount,
+            currency: PAYSTACK_CONFIG.CURRENCY,
+            metadata: { ...metadata, userId, planName, cycle, transaction_type: "first_payment" },
+            callback_url: getCallbackUrl('payment') // Redirect after payment
+        };
+
+        const response = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/transaction/initialize`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify(initBody)
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.status) throw new Error(result.message || "Paystack initialization failed.");
+
+        // Save transaction locally
+        await wixData.insert('PaystackTransactions', {
+            _id: result.data.reference,
+            userId,
+            email,
+            amount: amount / 100,
+            status: 'pending',
+            transactionType: 'first_payment',
+            createdAt: new Date()
+        }, { suppressAuth: true });
+
+        return result.data.authorization_url;
+
+    } catch (err) {
+        console.error("❌ createPaystackSubscriptionLink error:", err);
+        await sendDiscordAlert(`❌ createPaystackSubscriptionLink error: ${err.message}`);
+        throw err;
+    }
+}
+
+// ------------------ HANDLE FIRST PAYMENT SUCCESS WEBHOOK ------------------
+export async function handleFirstPaymentSuccess(data) {
+    try {
+        const userId = data.metadata?.userId;
+        if (!userId) throw new Error("Missing userId in webhook metadata.");
+
+        const email = data.customer?.email || data.metadata?.email;
+        const planName = data.metadata?.planName;
+        const isAnnual = data.metadata?.cycle === "Annual";
+
+        const secretKey = await getPaystackSecretKey();
+
+        // Get or create Paystack customer
+        const profileQuery = await wixData.query("Emergency_Profiles").eq("_owner", userId).limit(1).find({ suppressAuth: true });
+        let profile = profileQuery.items[0];
+
+        // Create minimal profile if missing
+        if (!profile) {
+            // Generate publicViewId safely
+            const cryptoModule = await getCrypto();
+            let publicViewId;
+            if (cryptoModule && cryptoModule.randomUUID) {
+                publicViewId = cryptoModule.randomUUID();
+            } else {
+                // Fallback UUID generation
+                publicViewId = `emergitag-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            }
+
+            profile = await wixData.insert("Emergency_Profiles", {
+                _owner: userId,
+                userId,
+                emailAddress: email || "unknown@example.com",
+                fullName: data.metadata?.fullName || "New Member",
+                phone: data.metadata?.phone || null,
+                publicViewId: publicViewId,
+                dateCreated: new Date()
+            }, { suppressAuth: true });
+        }
+
+        const fullName = profile.fullName || "Member";
+        const phone = profile.phone || null;
+        const customerCode = await getOrCreatePaystackCustomer(userId, email, fullName, phone);
+
+        // Lookup plan code
+        const planQuery = await wixData.query("PlanOptions").eq("planName", planName).limit(1).find({ suppressAuth: true });
+        const plan = planQuery.items[0];
+        const planCode = isAnnual ? plan.paystackPlanCodeAnnual : plan.paystackPlanCode;
+
+        // Create subscription now that card is authorized
+        const subscriptionBody = {
+            customer: customerCode,
+            plan: planCode,
+            metadata: { userId, planName, cycle: isAnnual ? "Annual" : "Monthly" }
+        };
+
+        const response = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/subscription`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify(subscriptionBody)
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.status) throw new Error(result.message || "Paystack subscription creation failed.");
+
+        console.log("✅ Subscription created successfully:", result.data);
+
+        // Update transaction and profile
+        await wixData.update("PaystackTransactions", {
+            _id: data.reference,
+            status: "success",
+            paidAt: new Date(data.paid_at || new Date())
+        }, { suppressAuth: true });
+
+        profile.membershipTier = planName;
+        profile.planStatus = "active";
+        profile.lastPaymentDate = new Date(data.paid_at || new Date());
+        await wixData.update("Emergency_Profiles", profile, { suppressAuth: true });
+
+    } catch (err) {
+        console.error("❌ handleFirstPaymentSuccess error:", err);
+        await sendDiscordAlert(`❌ handleFirstPaymentSuccess error: ${err.message}`);
+        throw err;
+    }
+}

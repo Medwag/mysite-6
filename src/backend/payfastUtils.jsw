@@ -1,0 +1,324 @@
+// backend/payfastUtils.jsw
+// Enhanced PayFast Utilities for EmergiTag
+import { getSecret } from 'wix-secrets-backend';
+import { getPayFastCredentials, isPayFastSandbox } from 'backend/payfast-config.jsw';
+
+// Safe crypto import - only load when needed
+let crypto = null;
+async function getCrypto() {
+    if (!crypto) {
+        try {
+            crypto = await import('crypto');
+            return crypto;
+        } catch (err) {
+            console.warn('Crypto module not available, hash generation disabled:', err.message);
+            return null;
+        }
+    }
+    return crypto;
+}
+
+/**
+ * Enhanced PayFast signature validation with better error handling
+ * @param {Object} params - The parsed ITN parameters
+ * @param {boolean} skipValidation - Skip validation for testing (use carefully)
+ * @returns {Promise<{isValid: boolean, details: object}>} - Validation result with details
+ */
+export async function validatePayFastParams(params, skipValidation = false) {
+    try {
+        console.log('[PayFast Utils] Validating PayFast signature...');
+        
+        if (skipValidation) {
+            console.warn('[PayFast Utils] ⚠️ Signature validation SKIPPED (testing mode)');
+            return { isValid: true, details: { skipped: true } };
+        }
+
+        const { passphrase } = await getPayFastCredentials();
+        const receivedSignature = params.signature;
+        
+        if (!receivedSignature) {
+            console.error('[PayFast Utils] ❌ No signature received in parameters');
+            return { isValid: false, details: { error: 'No signature provided' } };
+        }
+
+        // Create params copy without signature for validation
+        const paramsForValidation = { ...params };
+        delete paramsForValidation.signature;
+
+        const generatedSignature = await generatePayFastSignature(paramsForValidation, passphrase);
+        const isValid = generatedSignature === receivedSignature;
+        
+        console.log('[PayFast Utils] Signature validation result:', {
+            received: receivedSignature,
+            generated: generatedSignature,
+            isValid
+        });
+
+        return {
+            isValid,
+            details: {
+                receivedSignature,
+                generatedSignature,
+                matched: isValid,
+                isSandbox: await isPayFastSandbox()
+            }
+        };
+        
+    } catch (err) {
+        console.error('[PayFast Utils] ❌ Signature validation failed:', err);
+        return { isValid: false, details: { error: err.message } };
+    }
+}
+
+/**
+ * Enhanced PayFast MD5 signature generation with proper encoding
+ * @param {Object} params - Key-value pairs to encode and sign
+ * @param {string} passphrase - PayFast passphrase (optional for sandbox)
+ * @returns {Promise<string>} - MD5 signature string
+ */
+export async function generatePayFastSignature(params, passphrase = '') {
+    try {
+        console.log('[PayFast Utils] Generating PayFast signature...');
+        
+        const cryptoLib = await getCrypto();
+        if (!cryptoLib) {
+            console.error('[PayFast Utils] ❌ Crypto library not available');
+            throw new Error('Crypto library required for signature generation');
+        }
+
+        // Sort parameters by key (PayFast requirement)
+        const sortedKeys = Object.keys(params).sort();
+        
+        // Build query string with proper encoding
+        const queryString = sortedKeys
+            .filter(key => params[key] !== undefined && params[key] !== null && params[key] !== '')
+            .map(key => `${key}=${customEncode(String(params[key]))}`)
+            .join('&');
+
+        // Add passphrase if provided
+        const fullString = passphrase 
+            ? `${queryString}&passphrase=${customEncode(passphrase)}`
+            : queryString;
+
+        console.log('[PayFast Utils] Parameters for signature:', Object.keys(params).sort());
+        console.log('[PayFast Utils] Query string length:', queryString.length);
+        console.log('[PayFast Utils] Full string to sign length:', fullString.length);
+        console.log('[PayFast Utils] Has passphrase:', !!passphrase);
+        
+        // Generate MD5 hash
+        const signature = cryptoLib
+            .createHash("md5")
+            .update(fullString)
+            .digest("hex");
+
+        console.log('[PayFast Utils] ✅ Generated signature:', signature);
+        return signature;
+        
+    } catch (err) {
+        console.error('[PayFast Utils] ❌ Signature generation failed:', err);
+        throw err;
+    }
+}
+
+/**
+ * Debug function to help troubleshoot signature mismatches
+ * @param {Object} params - Payment parameters 
+ * @param {string} passphrase - PayFast passphrase
+ * @param {string} receivedSignature - Signature received from PayFast
+ * @returns {Promise<object>} Debug information
+ */
+export async function debugPayFastSignature(params, passphrase, receivedSignature) {
+    try {
+        const generatedSignature = await generatePayFastSignature(params, passphrase);
+        
+        return {
+            receivedSignature,
+            generatedSignature,
+            match: receivedSignature === generatedSignature,
+            parameters: Object.keys(params).sort(),
+            hasPassphrase: !!passphrase,
+            parameterCount: Object.keys(params).length
+        };
+    } catch (err) {
+        return {
+            error: err.message,
+            parameters: Object.keys(params || {}),
+            hasPassphrase: !!passphrase
+        };
+    }
+}
+
+/**
+ * PayFast encoding per their documentation:
+ * - Use encodeURIComponent and convert %20 to +
+ * - This matches PayFast's exact requirements
+ * @param {string} value - Value to encode
+ * @returns {string} - PayFast encoded value
+ */
+export function customEncode(value) {
+    if (value === undefined || value === null) {
+        return '';
+    }
+    
+    return encodeURIComponent(String(value)).replace(/%20/g, '+');
+}
+
+/**
+ * Generate standardized PayFast payment reference for signup
+ * @param {string} userId - User ID
+ * @param {string} email - User email
+ * @returns {string} - Standardized PayFast reference
+ */
+export function generatePayFastSignupReference(userId, email) {
+    const timestamp = Date.now();
+    const emailPrefix = email.split('@')[0].substring(0, 5).toUpperCase();
+    return `EMERGI_PF_SIGNUP_${emailPrefix}_${userId}_${timestamp}`;
+}
+
+/**
+ * Validate PayFast ITN IP address
+ * @param {string} clientIP - IP address from request
+ * @returns {boolean} - True if IP is from PayFast
+ */
+export function validatePayFastIP(clientIP) {
+    // PayFast IP ranges (as of 2024)
+    const payfastIPs = [
+        '197.97.145.144',  // Primary PayFast IP
+        '41.74.179.194',   // Secondary PayFast IP
+        '41.74.179.195',   // Tertiary PayFast IP
+        '41.74.179.196',   // Additional PayFast IP
+        '196.201.63.190',  // Additional PayFast IP range
+        '127.0.0.1',       // Localhost for testing
+        '::1'              // IPv6 localhost
+    ];
+    
+    const isValid = payfastIPs.includes(clientIP);
+    console.log(`[PayFast Utils] IP validation: ${clientIP} -> ${isValid ? 'TRUSTED' : 'UNTRUSTED'}`);
+    
+    return isValid;
+}
+
+/**
+ * Parse and validate PayFast ITN data
+ * @param {string} rawData - Raw ITN data from PayFast
+ * @returns {object} - Parsed and validated ITN data
+ */
+export function parsePayFastITN(rawData) {
+    try {
+        console.log('[PayFast Utils] Parsing PayFast ITN data...');
+        
+        // Parse URL-encoded data
+        const params = new URLSearchParams(rawData);
+        const parsedData = {};
+        
+        for (const [key, value] of params) {
+            parsedData[key] = value;
+        }
+        
+        // Validate required fields
+        const requiredFields = ['m_payment_id', 'pf_payment_id', 'payment_status', 'amount_gross'];
+        const missingFields = requiredFields.filter(field => !parsedData[field]);
+        
+        if (missingFields.length > 0) {
+            console.error('[PayFast Utils] ❌ Missing required ITN fields:', missingFields);
+            throw new Error(`Missing required ITN fields: ${missingFields.join(', ')}`);
+        }
+        
+        // Convert numeric fields
+        if (parsedData.amount_gross) {
+            parsedData.amount_gross = parseFloat(parsedData.amount_gross);
+        }
+        if (parsedData.amount_fee) {
+            parsedData.amount_fee = parseFloat(parsedData.amount_fee);
+        }
+        if (parsedData.amount_net) {
+            parsedData.amount_net = parseFloat(parsedData.amount_net);
+        }
+        
+        console.log('[PayFast Utils] ✅ ITN data parsed successfully');
+        return {
+            success: true,
+            data: parsedData,
+            isSignupPayment: isSignupPaymentReference(parsedData.m_payment_id),
+            paymentStatus: parsedData.payment_status,
+            amount: parsedData.amount_gross
+        };
+        
+    } catch (err) {
+        console.error('[PayFast Utils] ❌ ITN parsing failed:', err);
+        return {
+            success: false,
+            error: err.message,
+            data: null
+        };
+    }
+}
+
+/**
+ * Check if payment reference indicates a signup payment
+ * @param {string} reference - Payment reference
+ * @returns {boolean} - True if signup payment
+ */
+export function isSignupPaymentReference(reference) {
+    if (!reference) return false;
+    
+    const ref = reference.toLowerCase();
+    return (
+        ref.includes('signup') || 
+        ref.includes('sign-up') ||
+        ref.includes('emergi_pf_signup') ||
+        ref.includes('registration')
+    );
+}
+
+/**
+ * Create PayFast payment parameters for signup
+ * @param {string} userId - User ID
+ * @param {string} userEmail - User email
+ * @param {number} amount - Payment amount (default 149.00 ZAR)
+ * @returns {Promise<object>} - PayFast payment parameters
+ */
+export async function createPayFastSignupParams(userId, userEmail, amount = 149.00) {
+    try {
+        console.log('[PayFast Utils] Creating PayFast signup parameters...');
+        
+        const { merchantId, merchantKey } = await getPayFastCredentials();
+        const paymentReference = generatePayFastSignupReference(userId, userEmail);
+        
+        const params = {
+            // Merchant details
+            merchant_id: merchantId,
+            merchant_key: merchantKey,
+            
+            // Payment details
+            amount: amount.toFixed(2),
+            item_name: "EmergiTag Sign Up Fee",
+            item_description: "One-time registration fee for EmergiTag emergency profile service",
+            
+            // Customer details
+            email_address: userEmail,
+            email_confirmation: 1,
+            confirmation_address: userEmail,
+            
+            // PayFast URLs
+            return_url: "https://www.emergitag.me/signup-success",
+            cancel_url: "https://www.emergitag.me/signup-cancelled",
+            notify_url: "https://www.emergitag.me/_functions/payfast-itn",
+            
+            // Custom fields
+            m_payment_id: paymentReference,
+            custom_str1: userId,
+            custom_str2: "signup",
+            custom_str3: userEmail,
+            custom_str4: "EmergiTag",
+            custom_str5: new Date().toISOString()
+        };
+        
+        console.log('[PayFast Utils] ✅ PayFast signup parameters created');
+        return params;
+        
+    } catch (err) {
+        console.error('[PayFast Utils] ❌ Failed to create PayFast parameters:', err);
+        throw err;
+    }
+}

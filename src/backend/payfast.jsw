@@ -1,0 +1,38 @@
+// backend/payfast.jsw
+import { getPayFastConfig } from 'backend/payfast-config.jsw';
+import { generatePayFastSignature } from 'backend/payfastUtils.jsw';
+import { sendDiscordLog } from 'backend/logger.jsw';
+
+export async function createPayfastPayment(userId, email) {
+    const config = await getPayFastConfig();
+    const { merchantId, merchantKey, passphrase } = config.getCredentials();
+
+    // Required parameters
+    const data = {
+        merchant_id: merchantId,
+        merchant_key: merchantKey,
+        return_url: "https://www.emergitag.me/signup-success",
+        cancel_url: "https://www.emergitag.me/signup-cancelled",
+        notify_url: "https://www.emergitag.me/_functions/payfast-itn",
+        name_first: "EmergiTag",
+        email_address: email,
+        m_payment_id: userId,
+        amount: "149.00",
+        item_name: "EmergiTag Signup Fee"
+    };
+
+    // Generate signature using centralized utility
+    const signature = await generatePayFastSignature(data, passphrase);
+
+    // Build the URL using PayFast encoding (same as signature)
+    const { customEncode } = await import('backend/payfastUtils.jsw');
+    const queryString = Object.keys(data).sort()
+        .map(key => `${key}=${customEncode(data[key])}`)
+        .join('&') + `&signature=${signature}`;
+
+    const baseUrl = config.getPaymentUrl();
+    const finalUrl = `${baseUrl}?${queryString}`;
+
+    sendDiscordLog("📤 PayFast URL generated: " + finalUrl);
+    return finalUrl;
+}
