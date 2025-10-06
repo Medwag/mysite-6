@@ -8,7 +8,49 @@ import { createSignupPaymentUrl } from 'backend/paystackUrl.jsw';
 import { sendPostPaymentNotifications } from 'backend/profile-utils.jsw';
 
 $w.onReady(async function () {
-    console.log("🚀 Sign-up Page Loaded");
+    console.log("🚀 Sign-up Page Loaded - Starting COMPREHENSIVE ELEMENT DEBUG");
+    
+    // STEP 1: ENUMERATE ALL ELEMENTS ON THE PAGE
+    try {
+        console.log("🔍 SCANNING ALL ELEMENTS ON PAGE...");
+        const allElements = $w('*');
+        console.log(`📊 Total elements found: ${allElements.length}`);
+        
+        // Log ALL elements with their IDs and types
+        const elementsWithIds = allElements.filter(el => {
+            try {
+                return el.id && el.id.trim().length > 0;
+            } catch (e) {
+                return false;
+            }
+        });
+        
+        console.log(`🔍 COMPLETE ELEMENT INVENTORY (${elementsWithIds.length} elements with IDs):`);
+        elementsWithIds.forEach((el, index) => {
+            try {
+                console.log(`${index + 1}. ID:"${el.id}" | Type:${el.type} | Tag:${el.tagName || 'unknown'}`);
+            } catch (e) {
+                console.log(`${index + 1}. ID:[error] | Error:${e.message}`);
+            }
+        });
+        
+        // STEP 2: LOOK FOR ELEMENTS THAT CONTAIN OUR TARGET WORDS
+        console.log("\n🎯 SEARCHING FOR ELEMENTS CONTAINING TARGET KEYWORDS:");
+        const targetKeywords = ['paystack', 'payfast', 'signup', 'dashboard', 'subscription', 'button', 'container', 'status', 'form'];
+        
+        targetKeywords.forEach(keyword => {
+            const matches = elementsWithIds.filter(el => 
+                el.id.toLowerCase().includes(keyword.toLowerCase())
+            );
+            console.log(`🔍 "${keyword}": ${matches.length} matches`);
+            matches.forEach(match => {
+                console.log(`   - ID:"${match.id}" | Type:${match.type}`);
+            });
+        });
+        
+    } catch (e) {
+        console.error("❌ Element enumeration failed:", e);
+    }
     
     // Cache elements with container-aware access
     // Based on user report: openSignUp and dashboard buttons are in box61
@@ -33,6 +75,49 @@ $w.onReady(async function () {
         return null;
     }
     
+    // STEP 3: DIRECT ELEMENT ACCESS TEST
+    console.log("\n🧪 TESTING DIRECT ACCESS TO SPECIFIC ELEMENTS:");
+    const directTests = [
+        'paystackPayButton',
+        'payfastPayButton', 
+        'openSignUp',
+        'goToDashboardButton',
+        'goToSubscriptionButton',
+        'statusText',
+        'formContainer',
+        'formContainer01',
+        'box61'
+    ];
+    
+    directTests.forEach(elementId => {
+        console.log(`\n🔍 Testing "${elementId}":`);
+        const testSelectors = [
+            `#${elementId}`,
+            elementId,
+            `[id="${elementId}"]`,
+            `[id*="${elementId}"]`
+        ];
+        
+        testSelectors.forEach(selector => {
+            try {
+                const result = $w(selector);
+                if (result && result.length > 0) {
+                    console.log(`   ✅ SUCCESS: "${selector}" found ${result.length} element(s)`);
+                    try {
+                        console.log(`      - Type: ${result.type || result[0].type || 'unknown'}`);
+                        console.log(`      - ID: ${result.id || result[0].id || 'unknown'}`);
+                    } catch (propError) {
+                        console.log(`      - Properties not readable: ${propError.message}`);
+                    }
+                } else {
+                    console.log(`   ❌ FAIL: "${selector}" returned empty/null`);
+                }
+            } catch (e) {
+                console.log(`   💥 ERROR: "${selector}" threw: ${e.message}`);
+            }
+        });
+    });
+
     // Get elements using multiple selector attempts
     paystackBtn = getElement(['#paystackPayButton', '#formContainer01 #paystackPayButton', 'paystackPayButton'], 'paystackPayButton');
     payfastBtn = getElement(['#payfastPayButton', '#formContainer01 #payfastPayButton', 'payfastPayButton'], 'payfastPayButton');
@@ -157,6 +242,38 @@ $w.onReady(async function () {
 
     } catch (error) {
         console.error("❌ Signup page error:", error);
-        $w('#statusText').text = `An error occurred: ${error.message}`;
+        
+        // Try to show error in ANY text element we can find
+        try {
+            const allTextElements = $w('*').filter(el => {
+                try {
+                    return el.type === 'text' || (el.text !== undefined);
+                } catch (e) {
+                    return false;
+                }
+            });
+            
+            if (allTextElements.length > 0) {
+                allTextElements[0].text = `❌ ERROR: ${error.message}`;
+                console.log(`✅ Error shown in text element: ${allTextElements[0].id || 'unknown ID'}`);
+            } else {
+                console.log("❌ No text elements found to show error");
+            }
+        } catch (e) {
+            console.log("❌ Could not display error:", e.message);
+        }
     }
+    
+    // FINAL ELEMENT REPORT SUMMARY
+    console.log("\n" + "=".repeat(60));
+    console.log("📋 FINAL ELEMENT ACCESS SUMMARY");
+    console.log("=".repeat(60));
+    console.log(`openSignUp: ${openSignUp ? '✅ FOUND' : '❌ NOT FOUND'}`);
+    console.log(`paystackBtn: ${paystackBtn ? '✅ FOUND' : '❌ NOT FOUND'}`);
+    console.log(`payfastBtn: ${payfastBtn ? '✅ FOUND' : '❌ NOT FOUND'}`);
+    console.log(`goSubBtn: ${goSubBtn ? '✅ FOUND' : '❌ NOT FOUND'}`);
+    console.log(`goDashBtn: ${goDashBtn ? '✅ FOUND' : '❌ NOT FOUND'}`);
+    console.log(`statusText: ${statusText ? '✅ FOUND' : '❌ NOT FOUND'}`);
+    console.log(`formContainer: ${formContainer ? '✅ FOUND' : '❌ NOT FOUND'}`);
+    console.log("=".repeat(60));
 });
