@@ -1,4 +1,4 @@
-// src/pages/signup.js
+// Sign-up Page - Clean Implementation Based on Exact Requirements
 import wixLocation from 'wix-location';
 import wixUsers from 'wix-users';
 import { getUserPaymentStatus } from 'backend/status.jsw';
@@ -7,56 +7,45 @@ import { createPayfastPayment } from 'backend/payfast.jsw';
 import { createSignupPaymentUrl } from 'backend/paystackUrl.jsw';
 import { sendPostPaymentNotifications } from 'backend/profile-utils.jsw';
 
+// EXACT ELEMENT NAMES AS SPECIFIED:
+// dashboard - Navigation button (paid + subscription selected)
+// subscribe - Navigation button (paid signup, needs plan selection) 
+// signup - Action button (no signup payment, no subscription)
+// formContainerdata - Animated container with payment buttons
+// payfastPaymentButton - PayFast payment option
+// paystackPaymentButton - Paystack payment option
+// MembersStatus - Status text at top of page
+
 $w.onReady(async function () {
-    console.log("🚀 Sign-up Page Loaded - Starting COMPREHENSIVE ELEMENT DEBUG");
+    console.log("🚀 Sign-up Page Loaded - Using Exact Element Names");
     
-    // STEP 1: ENUMERATE ALL ELEMENTS ON THE PAGE
-    try {
-        console.log("🔍 SCANNING ALL ELEMENTS ON PAGE...");
-        const allElements = $w('*');
-        console.log(`📊 Total elements found: ${allElements.length}`);
+    // Get elements using EXACT names provided by user
+    function getElementSafely(elementId, description) {
+        const selectors = [`#${elementId}`, elementId];
         
-        // Log ALL elements with their IDs and types
-        const elementsWithIds = allElements.filter(el => {
+        for (const selector of selectors) {
             try {
-                return el.id && el.id.trim().length > 0;
+                const element = $w(selector);
+                if (element && element.length > 0) {
+                    console.log(`✅ Found ${description}: "${selector}"`);
+                    return element;
+                }
             } catch (e) {
-                return false;
+                continue;
             }
-        });
-        
-        console.log(`🔍 COMPLETE ELEMENT INVENTORY (${elementsWithIds.length} elements with IDs):`);
-        elementsWithIds.forEach((el, index) => {
-            try {
-                console.log(`${index + 1}. ID:"${el.id}" | Type:${el.type} | Tag:${el.tagName || 'unknown'}`);
-            } catch (e) {
-                console.log(`${index + 1}. ID:[error] | Error:${e.message}`);
-            }
-        });
-        
-        // STEP 2: LOOK FOR ELEMENTS THAT CONTAIN OUR TARGET WORDS
-        console.log("\n🎯 SEARCHING FOR ELEMENTS CONTAINING TARGET KEYWORDS:");
-        const targetKeywords = ['paystack', 'payfast', 'signup', 'dashboard', 'subscription', 'button', 'container', 'status', 'form'];
-        
-        targetKeywords.forEach(keyword => {
-            const matches = elementsWithIds.filter(el => 
-                el.id.toLowerCase().includes(keyword.toLowerCase())
-            );
-            console.log(`🔍 "${keyword}": ${matches.length} matches`);
-            matches.forEach(match => {
-                console.log(`   - ID:"${match.id}" | Type:${match.type}`);
-            });
-        });
-        
-    } catch (e) {
-        console.error("❌ Element enumeration failed:", e);
+        }
+        console.log(`❌ Could not find ${description} (${elementId})`);
+        return null;
     }
     
-    // Cache elements with container-aware access
-    // Based on user report: openSignUp and dashboard buttons are in box61
-    // Payment buttons are in formContainer01
-    
-    let paystackBtn, payfastBtn, openSignUp, goSubBtn, goDashBtn, statusText, formContainer;
+    // Cache elements using EXACT names you specified
+    const dashboardBtn = getElementSafely('dashboard', 'Dashboard Button');
+    const subscribeBtn = getElementSafely('subscribe', 'Subscribe Button'); 
+    const signupBtn = getElementSafely('signup', 'Signup Button');
+    const formContainer = getElementSafely('formContainerdata', 'Form Container');
+    const payfastBtn = getElementSafely('payfastPaymentButton', 'PayFast Payment Button');
+    const paystackBtn = getElementSafely('paystackPaymentButton', 'Paystack Payment Button');
+    const statusText = getElementSafely('MembersStatus', 'Members Status Text');
     
     // Try multiple selector approaches for each element
     function getElement(selectors, elementName) {
@@ -127,67 +116,102 @@ $w.onReady(async function () {
     statusText = getElement(['#statusText', 'statusText'], 'statusText');
     formContainer = getElement(['#formContainer01', '#formContainer', 'formContainer01', 'formContainer'], 'formContainer');
 
-    // Initial state - with safety checks
-    if (paystackBtn) paystackBtn.hide();
-    if (payfastBtn) payfastBtn.hide();
-    if (goSubBtn) goSubBtn.hide();
-    if (goDashBtn) goDashBtn.hide();
+    // Initialize page - hide all buttons initially  
+    console.log("\n🎛️ Initializing page elements...");
+    if (dashboardBtn) dashboardBtn.hide();
+    if (subscribeBtn) subscribeBtn.hide();
+    if (signupBtn) signupBtn.hide();
     if (formContainer) formContainer.hide();
-    if (statusText) statusText.text = "Checking your signup status...";
+    if (statusText) statusText.text = "🔍 Checking your signup status...";
 
     try {
+        // Get user information
         const user = wixUsers.currentUser;
         if (!user.loggedIn) {
-            statusText.text = "Please log in or sign up to continue.";
+            if (statusText) statusText.text = "⚠️ Please log in to continue.";
             return;
         }
 
         const userId = user.id;
         const email = user.getEmail ? await user.getEmail() : null;
+        console.log(`👤 User loaded: ${email} (${userId})`);
 
-        console.log(`🧠 Loaded user: ${email} (${userId})`);
-
-        // Step 1: Check if user already paid
+        // Get user's payment and subscription status
         const status = await getUserPaymentStatus(userId, email);
-        console.log("💰 Payment status:", status);
+        console.log("� User status:", status);
 
-        if (status.hasSignUpPaid) {
-            if (statusText) statusText.text = "✅ Signup payment already completed! Redirecting...";
-            setTimeout(() => wixLocation.to("/subscription"), 1500);
-            return;
-        }
-
-        // Step 2: Show open sign-up CTA
-        if (statusText) statusText.text = "Welcome! Click below to begin your signup.";
-        if (openSignUp) {
-            openSignUp.show();
+        // BUSINESS LOGIC IMPLEMENTATION
+        // Based on your exact requirements:
+        
+        if (status.hasSignUpPaid && status.hasSubscription) {
+            // SCENARIO 1: Sign up paid AND subscription selected/paid
+            // SHOW: dashboard button only
+            console.log("✅ SCENARIO 1: User has paid signup + has subscription → Show DASHBOARD");
+            if (statusText) statusText.text = `✅ Welcome back! You're all set with your ${status.membershipTier || 'premium'} membership.`;
+            if (dashboardBtn) dashboardBtn.show();
+            
+        } else if (status.hasSignUpPaid && !status.hasSubscription) {
+            // SCENARIO 2: Sign up paid but NO subscription selected
+            // SHOW: subscribe button only  
+            console.log("⚠️ SCENARIO 2: User paid signup but needs subscription → Show SUBSCRIBE");
+            if (statusText) statusText.text = "✅ Signup payment confirmed! Please select your membership plan.";
+            if (subscribeBtn) subscribeBtn.show();
+            
         } else {
-            console.log("❌ openSignUp element not found - cannot show signup button");
-            if (statusText) statusText.text = "⚠️ Page setup issue - please contact support";
+            // SCENARIO 3: NO signup payment confirmed
+            // SHOW: signup button only
+            console.log("📝 SCENARIO 3: User needs to pay signup fee → Show SIGNUP");
+            if (statusText) statusText.text = "👋 Welcome! Please complete your signup payment to get started.";
+            if (signupBtn) signupBtn.show();
         }
 
-        // Step 3: Animate open signup container
-        if (openSignUp) {
-            openSignUp.onClick(() => {
-                if (openSignUp) openSignUp.hide("fade", { duration: 200 });
-                if (formContainer) formContainer.show("slide", { direction: "left", duration: 500 });
-                if (statusText) statusText.text = "Please choose your payment method below:";
-                if (paystackBtn) paystackBtn.show("fade");
-                if (payfastBtn) payfastBtn.show("fade");
+        // BUTTON CLICK HANDLERS
+        
+        // DASHBOARD BUTTON: Navigate to dashboard  
+        if (dashboardBtn) {
+            dashboardBtn.onClick(() => {
+                console.log("🎯 Dashboard button clicked");
+                if (statusText) statusText.text = "Redirecting to your dashboard...";
+                wixLocation.to("/dashboard");
             });
-        } else {
-            console.log("❌ Cannot attach onClick to openSignUp - element not found");
+        }
+        
+        // SUBSCRIBE BUTTON: Navigate to subscription plans
+        if (subscribeBtn) {
+            subscribeBtn.onClick(() => {
+                console.log("🎯 Subscribe button clicked");  
+                if (statusText) statusText.text = "Redirecting to membership plans...";
+                wixLocation.to("/subscription"); // or wherever your plans are
+            });
+        }
+        
+        // SIGNUP BUTTON: Animate form container and show payment options
+        if (signupBtn) {
+            signupBtn.onClick(() => {
+                console.log("🎯 Signup button clicked - showing payment options");
+                
+                // Hide signup button and animate form container
+                if (signupBtn) signupBtn.hide("fade", { duration: 200 });
+                if (formContainer) formContainer.show("slide", { direction: "left", duration: 500 });
+                if (statusText) statusText.text = "💳 Please choose your payment method:";
+                
+                // Show payment buttons inside the container
+                if (payfastBtn) payfastBtn.show("fade");
+                if (paystackBtn) paystackBtn.show("fade");
+            });
         }
 
-        // Step 4: PAYSTACK PAYMENT FLOW
+        // PAYSTACK PAYMENT BUTTON: Initiate Paystack signup payment
         if (paystackBtn) {
             paystackBtn.onClick(async () => {
                 try {
+                    console.log("💳 Paystack payment button clicked");
                     if (statusText) statusText.text = "🔄 Creating Paystack payment link...";
+                    
                     const paystackUrl = await createSignupPaymentUrl(userId, email);
                     if (paystackUrl) {
-                        if (statusText) statusText.text = "Redirecting to Paystack for secure payment...";
-                        wixLocation.to(paystackUrl);
+                        if (statusText) statusText.text = "🔗 Redirecting to Paystack for secure payment...";
+                        setTimeout(() => wixLocation.to(paystackUrl), 500);
                     } else {
                         throw new Error("Paystack payment URL not generated.");
                     }
@@ -196,19 +220,22 @@ $w.onReady(async function () {
                     if (statusText) statusText.text = `⚠️ Paystack error: ${err.message}`;
                 }
             });
+            console.log("✅ Paystack payment button initialized");
         } else {
-            console.log("❌ Cannot attach onClick to paystackBtn - element not found");
+            console.log("❌ Cannot attach onClick to paystackPaymentButton - element not found");
         }
 
-        // Step 5: PAYFAST PAYMENT FLOW
+        // PAYFAST PAYMENT BUTTON: Initiate PayFast signup payment  
         if (payfastBtn) {
             payfastBtn.onClick(async () => {
                 try {
+                    console.log("💳 PayFast payment button clicked");
                     if (statusText) statusText.text = "🔄 Creating PayFast payment link...";
+                    
                     const payfastUrl = await createPayfastPayment(userId, email);
                     if (payfastUrl) {
-                        if (statusText) statusText.text = "Redirecting to PayFast for secure payment...";
-                        wixLocation.to(payfastUrl);
+                        if (statusText) statusText.text = "🔗 Redirecting to PayFast for secure payment...";
+                        setTimeout(() => wixLocation.to(payfastUrl), 500);
                     } else {
                         throw new Error("PayFast payment URL not generated.");
                     }
@@ -217,8 +244,9 @@ $w.onReady(async function () {
                     if (statusText) statusText.text = `⚠️ PayFast error: ${err.message}`;
                 }
             });
+            console.log("✅ PayFast payment button initialized");
         } else {
-            console.log("❌ Cannot attach onClick to payfastBtn - element not found");
+            console.log("❌ Cannot attach onClick to payfastPaymentButton - element not found");
         }
 
         // Step 6: HANDLE RETURN FROM PAYMENT GATEWAYS
