@@ -36,6 +36,9 @@ $w.onReady(async () => {
     sendDiscordLog: typeof sendDiscordLog
   };
   console.log("📦 Imports check:", imports);
+
+  // First audit what elements exist on the page
+  auditPageElements();
   
   // Test PayFast backend connection
   try {
@@ -162,13 +165,74 @@ $w.onReady(async () => {
         }
       } else {
         console.log(`⚠️ ${description} element not found in DOM`);
-        sendDiscordLog(`⚠️ ${description} element not found in DOM for user ${userId}`);
+        sendDiscordLog(`⚠️ MISSING ELEMENT: ${elementId} (${description}) not found in DOM for user ${userId}. Please check HTML page structure.`);
       }
     } catch (e) {
       console.error(`❌ ${description} attachment failed:`, e);
       sendDiscordLog(`❌ ${description} attachment failed for user ${userId}: ${e.message}`);
     }
     return false;
+  }
+
+  // Helper function to create missing button elements programmatically
+  function createMissingButton(buttonId, buttonText, containerSelector = 'body') {
+    try {
+      // Check if we can access the container
+      const container = $w(containerSelector);
+      if (!container || container.length === 0) {
+        console.log(`⚠️ Cannot create ${buttonId}: container ${containerSelector} not found`);
+        return false;
+      }
+
+      // Note: In Wix Velo, we typically can't create elements programmatically
+      // The elements must exist in the Wix Editor
+      sendDiscordLog(`⚠️ MISSING BUTTON: ${buttonId} (${buttonText}) must be added in Wix Editor. Cannot create programmatically.`);
+      return false;
+    } catch (e) {
+      console.error(`❌ Error attempting to create ${buttonId}:`, e);
+      sendDiscordLog(`❌ Error attempting to create ${buttonId}: ${e.message}`);
+      return false;
+    }
+  }
+
+  // Helper function to check what elements actually exist on the page
+  function auditPageElements() {
+    const requiredElements = [
+      '#goToDashboardButton',
+      '#goToSubscriptionButton', 
+      '#openSignUp',
+      '#paystackPayButton',
+      '#payfastPayButton',
+      '#formContainer',
+      '#statusText',
+      '#submitFormButton'
+    ];
+    
+    const foundElements = [];
+    const missingElements = [];
+    
+    requiredElements.forEach(elementId => {
+      try {
+        const elements = $w(elementId);
+        if (elements && elements.length > 0) {
+          foundElements.push(elementId);
+        } else {
+          missingElements.push(elementId);
+        }
+      } catch (e) {
+        missingElements.push(`${elementId} (error: ${e.message})`);
+      }
+    });
+    
+    sendDiscordLog(`🔍 Page Element Audit for user ${userId}:`);
+    sendDiscordLog(`✅ Found elements (${foundElements.length}): ${foundElements.join(', ')}`);
+    sendDiscordLog(`❌ Missing elements (${missingElements.length}): ${missingElements.join(', ')}`);
+    
+    if (missingElements.length > 0) {
+      sendDiscordLog(`⚠️ CRITICAL: PayFast button functionality requires all elements to exist in HTML. Please add missing elements to the Sign-up page.`);
+    }
+    
+    return { found: foundElements, missing: missingElements };
   }
 
   // Attach event listeners with validation
@@ -322,6 +386,114 @@ async function handleFormSubmit(userId, email) {
     console.error("❌ Error saving profile:", err);
     $w("#statusText").text = "❌ Could not save your profile. Please try again.";
     sendDiscordLog("❌ Profile save error: " + err.message);
+  }
+}
+
+/* === Button Setup Logic === */
+
+async function setupButtonVisibility() {
+  try {
+    sendDiscordLog(`🔍 Setting up button visibility for user ${userId || 'anonymous'}`);
+    
+    // Get the user's current payment status
+    const paymentStatus = await getUserPaymentStatus(userId || 'anonymous');
+    sendDiscordLog(`📊 Payment status for user ${userId}: ${JSON.stringify(paymentStatus)}`);
+
+    // Track successful button setups
+    let buttonsSetup = 0;
+    let totalButtons = 0;
+
+    if (paymentStatus.hasPaidForCurrentTier) {
+      // Scenario 1: User has paid, show dashboard and subscription buttons
+      sendDiscordLog(`✅ User ${userId} has paid - showing dashboard/subscription buttons`);
+      
+      totalButtons += 5;
+      buttonsSetup += safeElementAction('#goToDashboardButton', (el) => el.show(), 'Show Dashboard Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#goToSubscriptionButton', (el) => el.show(), 'Show Subscription Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#openSignUp', (el) => el.hide(), 'Hide SignUp Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#paystackPayButton', (el) => el.hide(), 'Hide Paystack Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#payfastPayButton', (el) => el.hide(), 'Hide PayFast Button') ? 1 : 0;
+      
+      // Attach click handlers
+      safeAttachClick('#goToDashboardButton', () => {
+        wixLocationFrontend.to('/dashboard');
+      }, 'Go to Dashboard Button');
+      
+      safeAttachClick('#goToSubscriptionButton', () => {
+        wixLocationFrontend.to('/subscription-success');
+      }, 'Go to Subscription Button');
+      
+    } else if (paymentStatus.hasSelectedTier) {
+      // Scenario 2: User selected tier but hasn't paid, show payment buttons
+      sendDiscordLog(`💰 User ${userId} selected tier but not paid - showing payment buttons`);
+      
+      totalButtons += 5;
+      buttonsSetup += safeElementAction('#goToDashboardButton', (el) => el.hide(), 'Hide Dashboard Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#goToSubscriptionButton', (el) => el.hide(), 'Hide Subscription Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#openSignUp', (el) => el.hide(), 'Hide SignUp Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#paystackPayButton', (el) => el.show(), 'Show Paystack Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#payfastPayButton', (el) => el.show(), 'Show PayFast Button') ? 1 : 0;
+      
+      // Attach payment handlers
+      safeAttachClick('#paystackPayButton', handlePaystackPayment, 'Paystack Pay Button');
+      safeAttachClick('#payfastPayButton', handlePayfastPayment, 'PayFast Pay Button');
+      
+    } else {
+      // Scenario 3: User hasn't selected tier, show signup button
+      sendDiscordLog(`📝 User ${userId} hasn't selected tier - showing signup button`);
+      
+      totalButtons += 5;
+      buttonsSetup += safeElementAction('#goToDashboardButton', (el) => el.hide(), 'Hide Dashboard Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#goToSubscriptionButton', (el) => el.hide(), 'Hide Subscription Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#openSignUp', (el) => el.show(), 'Show SignUp Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#paystackPayButton', (el) => el.hide(), 'Hide Paystack Button') ? 1 : 0;
+      buttonsSetup += safeElementAction('#payfastPayButton', (el) => el.hide(), 'Hide PayFast Button') ? 1 : 0;
+      
+      // Attach signup handler
+      safeAttachClick('#openSignUp', () => {
+        // Show the signup form or navigate to signup
+        safeElementAction('#formContainer', (el) => el.show(), 'Show Form Container');
+      }, 'Open SignUp Button');
+    }
+
+    // Summary of button setup
+    sendDiscordLog(`📊 Button setup summary: ${buttonsSetup}/${totalButtons} buttons successfully configured`);
+    
+    if (buttonsSetup === 0) {
+      sendDiscordLog(`🚨 CRITICAL: No buttons could be configured! All required HTML elements are missing from the Sign-up page.`);
+      sendDiscordLog(`🔧 SOLUTION NEEDED: Please add the required button elements in Wix Editor with IDs: goToDashboardButton, goToSubscriptionButton, openSignUp, paystackPayButton, payfastPayButton`);
+    } else if (buttonsSetup < totalButtons) {
+      sendDiscordLog(`⚠️ WARNING: Only ${buttonsSetup} out of ${totalButtons} buttons configured. Some functionality may not work.`);
+    }
+
+  } catch (error) {
+    console.error("❌ Error setting up button visibility:", error);
+    sendDiscordLog(`❌ Error setting up button visibility for user ${userId}: ${error.message}`);
+  }
+}
+
+// Define payment handlers
+async function handlePaystackPayment() {
+  try {
+    sendDiscordLog(`💳 Paystack payment initiated for user ${userId}`);
+    // Get user email from form or user data
+    const email = $w('#emailInput').value || wixUsers.currentUser.email;
+    await handlePaystackSignup(userId, email);
+  } catch (error) {
+    console.error("❌ Paystack payment error:", error);
+    sendDiscordLog(`❌ Paystack payment error for user ${userId}: ${error.message}`);
+  }
+}
+
+async function handlePayfastPayment() {
+  try {
+    sendDiscordLog(`💳 PayFast payment initiated for user ${userId}`);
+    // Get user email from form or user data
+    const email = $w('#emailInput').value || wixUsers.currentUser.email;
+    await handlePayfastSignup(userId, email);
+  } catch (error) {
+    console.error("❌ PayFast payment error:", error);
+    sendDiscordLog(`❌ PayFast payment error for user ${userId}: ${error.message}`);
   }
 }
 
