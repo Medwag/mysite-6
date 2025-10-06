@@ -54,8 +54,8 @@ export async function getUserPaymentStatus(userId, email) {
       status.signupAmount = paystack.items[0].amount || 150.0;
     }
 
-    // --- Check PayFastTransactions collection ---
-    const payfast = await wixData.query("PayFastTransactions")
+    // --- Check PayFast_Transactions collection ---
+    const payfast = await wixData.query("PayFast_Transactions")
       .eq("profileOwner", userId)
       .limit(1)
       .find({ suppressAuth: true });

@@ -176,7 +176,7 @@ export async function post_payfastWebhook(request) {
     }
 
     // 4️⃣ Deduplication
-    const existing = await wixData.query('PayFastTransactions')
+    const existing = await wixData.query('PayFast_Transactions')
       .eq('paymentId', params.pf_payment_id)
       .find({ suppressAuth: true });
     if (existing.items.length) return ok({ body: 'Duplicate ignored' });
@@ -187,7 +187,7 @@ export async function post_payfastWebhook(request) {
     await sendDiscordLog(`✅ PayFast payment confirmed for user ${userId}`);
 
     // 6️⃣ Save transaction
-    await wixData.insert('PayFastTransactions', {
+    await wixData.insert('PayFast_Transactions', {
       paymentId: params.pf_payment_id,
       profileOwner: userId,
       amount: parseFloat(params.amount_gross),
