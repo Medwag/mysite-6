@@ -59,9 +59,28 @@ async function generateFallbackSignature(data, passphrase) {
 // Simple test function to verify backend connectivity
 export async function testPayfastConnection() {
     try {
-        await sendDiscordLog(`🧪 PayFast: Test connection successful`);
+        // Simple test that doesn't depend on external services
+        const testData = {
+            merchant_id: "test",
+            merchant_key: "test", 
+            amount: "100.00",
+            item_name: "Test"
+        };
+        
+        // Test that we can access the config function
+        const config = await getPayFastConfig();
+        
+        // Send success log without awaiting to avoid blocking
+        sendDiscordLog(`🧪 PayFast: Test connection successful - config loaded`).catch(e => 
+            console.log(`Discord log failed but test passed: ${e.message}`)
+        );
+        
         return "PayFast backend connection OK";
     } catch (error) {
+        // Send error log without awaiting
+        sendDiscordLog(`❌ PayFast: Test failed - ${error.message}`).catch(e => 
+            console.log(`Discord log failed: ${e.message}`)
+        );
         throw new Error(`PayFast backend test failed: ${error.message}`);
     }
 }

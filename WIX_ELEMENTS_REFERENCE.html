@@ -1,0 +1,56 @@
+<!-- HTML ELEMENTS REFERENCE FOR WIX EDITOR -->
+<!-- Copy these element IDs when adding elements in Wix Editor -->
+
+<!-- PAYMENT BUTTONS -->
+<button id="payfastPayButton">Pay with PayFast</button>
+<button id="paystackPayButton">Pay with Paystack</button>
+
+<!-- NAVIGATION BUTTONS -->  
+<button id="goToDashboardButton">Go to Dashboard</button>
+<button id="goToSubscriptionButton">Choose Membership</button>
+
+<!-- SIGNUP FLOW -->
+<button id="openSignUp">Sign Up Now</button>
+<div id="formContainer">
+  <!-- Form content will go here -->
+  <input id="emailInput" type="email" placeholder="Enter your email" />
+  <button id="submitFormButton">Submit</button>
+</div>
+
+<!-- STATUS DISPLAY -->
+<text id="statusText">Loading your status...</text>
+
+<!-- 
+WIXEDITOR SETUP NOTES:
+
+1. ADD BUTTON ELEMENTS:
+   - Drag Button from Add panel
+   - Set Element ID (without #) in Properties
+   - Set button text as shown above
+
+2. ADD TEXT ELEMENT:  
+   - Drag Text from Add panel
+   - Set ID to "statusText"
+   - Default text: "Loading your status..."
+
+3. ADD CONTAINER:
+   - Drag Container/Box from Add panel  
+   - Set ID to "formContainer"
+   - Initially set to collapsed/hidden
+
+4. ADD INPUT FIELD:
+   - Drag Text Input from Add panel
+   - Set ID to "emailInput" 
+   - Set placeholder text
+
+INITIAL VISIBILITY:
+- Hide all buttons initially (JavaScript controls them)
+- Show only statusText initially
+- Form container should be collapsed
+
+POSITIONING:
+- Payment buttons side by side
+- Navigation buttons in logical location
+- Status text prominently displayed
+- Form container below payment buttons
+-->

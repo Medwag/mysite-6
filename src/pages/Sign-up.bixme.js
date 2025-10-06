@@ -37,8 +37,78 @@ $w.onReady(async () => {
   };
   console.log("📦 Imports check:", imports);
 
-  // First audit what elements exist on the page
-  auditPageElements();
+  // Add delay for element loading and retry mechanism
+  async function auditWithRetry(retryCount = 0) {
+    sendDiscordLog(`🔍 Element audit attempt ${retryCount + 1}/3...`);
+    
+    const elementAudit = auditPageElements();
+    
+    // If we found some elements but not all, and this is not the final retry
+    if (elementAudit.missing.length > 0 && elementAudit.found.length > 0 && retryCount < 2) {
+      sendDiscordLog(`⏳ Found ${elementAudit.found.length}/8 elements, retrying in 1 second...`);
+      setTimeout(() => auditWithRetry(retryCount + 1), 1000);
+      return elementAudit;
+    }
+    
+    // Check if critical elements are still missing after retries
+    if (elementAudit && elementAudit.missing.length === 8) {
+      // ALL elements are missing - this might be a timing or selector issue
+      sendDiscordLog(`🚨 TIMING ISSUE: User reports buttons exist but JavaScript cannot find them!`);
+      sendDiscordLog(`🔧 POSSIBLE CAUSES: 1) Element IDs don't match 2) Timing issue 3) $w() selector problem`);
+      sendDiscordLog(`📊 User sees: goToDashboardButton, goToSubscriptionButton, openSignUp, payfastPayButton, paystackPayButton`);
+      sendDiscordLog(`🔍 JS Looking for: #goToDashboardButton, #goToSubscriptionButton, #openSignUp, #payfastPayButton, #paystackPayButton`);
+      
+      // Show a message to users if possible
+      console.log("🚨 ELEMENT ACCESS ISSUE: Buttons exist but JavaScript cannot access them");
+    } else if (elementAudit.missing.length > 0) {
+      sendDiscordLog(`⚠️ PARTIAL SUCCESS: ${elementAudit.found.length}/8 elements found. Missing: ${elementAudit.missing.join(', ')}`);
+    } else {
+      sendDiscordLog(`✅ SUCCESS: All ${elementAudit.found.length} elements found and accessible!`);
+    }
+    
+    return elementAudit;
+  }
+  
+  // First audit what elements exist on the page with retry
+  const elementAudit = await auditWithRetry();
+  
+  // Additional test: Try to directly access the buttons you mentioned
+  sendDiscordLog(`🧪 DIRECT ACCESS TEST: Testing specific buttons you can see...`);
+  
+  const buttonsToTest = [
+    'goToDashboardButton',
+    'goToSubscriptionButton', 
+    'openSignUp',
+    'payfastPayButton',
+    'paystackPayButton'
+  ];
+  
+  buttonsToTest.forEach(buttonId => {
+    try {
+      // Test multiple selector variations
+      const variations = [
+        `#${buttonId}`,
+        buttonId,
+        `[id="${buttonId}"]`
+      ];
+      
+      variations.forEach(selector => {
+        try {
+          const element = $w(selector);
+          if (element && element.length > 0) {
+            sendDiscordLog(`✅ DIRECT ACCESS SUCCESS: ${buttonId} found with selector "${selector}"`);
+          } else {
+            sendDiscordLog(`❌ DIRECT ACCESS FAIL: ${buttonId} not found with selector "${selector}"`);
+          }
+        } catch (e) {
+          sendDiscordLog(`❌ DIRECT ACCESS ERROR: ${buttonId} with "${selector}" - ${e.message}`);
+        }
+      });
+      
+    } catch (e) {
+      sendDiscordLog(`❌ DIRECT ACCESS EXCEPTION: ${buttonId} - ${e.message}`);
+    }
+  });
   
   // Test PayFast backend connection
   try {
@@ -56,24 +126,35 @@ $w.onReady(async () => {
     sendDiscordLog(`✅ PayFast payment function loaded successfully (function length: ${createPayfastPayment.length} parameters)`);
   }
   
-  // Helper function to safely manipulate elements
+  // Helper function to safely manipulate elements with multiple selector attempts
   function safeElementAction(elementId, action, description) {
-    try {
-      const elements = $w(elementId);
-      if (elements && elements.length > 0) {
-        const element = elements[0];
-        if (element) {
-          action(element);
-          console.log(`✅ ${description} action completed`);
-          return true;
+    // Try multiple selector variations
+    const selectors = [
+      elementId.startsWith('#') ? elementId : `#${elementId}`,
+      elementId.startsWith('#') ? elementId.substring(1) : elementId
+    ];
+    
+    for (const selector of selectors) {
+      try {
+        const elements = $w(selector);
+        if (elements && elements.length > 0) {
+          const element = elements[0];
+          if (element) {
+            action(element);
+            console.log(`✅ ${description} action completed with selector "${selector}"`);
+            sendDiscordLog(`✅ ${description} - SUCCESS with selector "${selector}"`);
+            return true;
+          }
         }
+      } catch (e) {
+        // Try next selector
+        continue;
       }
-      console.log(`⚠️ ${description} element not found`);
-      return false;
-    } catch (e) {
-      console.error(`❌ ${description} action failed:`, e);
-      return false;
     }
+    
+    console.log(`⚠️ ${description} element not found with any selector`);
+    sendDiscordLog(`❌ ${description} - FAILED with selectors: ${selectors.join(', ')}`);
+    return false;
   }
 
   // Initialize page elements with robust error handling
@@ -148,29 +229,37 @@ $w.onReady(async () => {
 
   // --- Button Listeners (with robust element validation) ---
   
-  // Helper function to safely attach event listeners
+  // Helper function to safely attach event listeners with multiple selector attempts  
   function safeAttachClick(elementId, handler, description) {
-    try {
-      // First check if element exists in the $w collection
-      const elements = $w(elementId);
-      if (elements && elements.length > 0) {
-        const element = elements[0];
-        if (element && typeof element.onClick === 'function') {
-          element.onClick(handler);
-          console.log(`✅ ${description} onClick handler attached successfully`);
-          return true;
-        } else {
-          console.log(`⚠️ ${description} exists but onClick method not available`);
-          sendDiscordLog(`⚠️ ${description} exists but onClick method not available for user ${userId}`);
+    // Try multiple selector variations
+    const selectors = [
+      elementId.startsWith('#') ? elementId : `#${elementId}`,
+      elementId.startsWith('#') ? elementId.substring(1) : elementId
+    ];
+    
+    for (const selector of selectors) {
+      try {
+        const elements = $w(selector);
+        if (elements && elements.length > 0) {
+          const element = elements[0];
+          if (element && typeof element.onClick === 'function') {
+            element.onClick(handler);
+            console.log(`✅ ${description} onClick handler attached with selector "${selector}"`);
+            sendDiscordLog(`✅ ${description} - onClick SUCCESS with selector "${selector}"`);
+            return true;
+          } else if (element) {
+            console.log(`⚠️ ${description} found with "${selector}" but onClick method not available`);
+            sendDiscordLog(`⚠️ ${description} found but onClick unavailable (type: ${element.type || 'unknown'})`);
+          }
         }
-      } else {
-        console.log(`⚠️ ${description} element not found in DOM`);
-        sendDiscordLog(`⚠️ MISSING ELEMENT: ${elementId} (${description}) not found in DOM for user ${userId}. Please check HTML page structure.`);
+      } catch (e) {
+        // Try next selector
+        continue;
       }
-    } catch (e) {
-      console.error(`❌ ${description} attachment failed:`, e);
-      sendDiscordLog(`❌ ${description} attachment failed for user ${userId}: ${e.message}`);
     }
+    
+    console.log(`❌ ${description} element not accessible with any selector`);
+    sendDiscordLog(`❌ ${description} - onClick FAILED with selectors: ${selectors.join(', ')}`);
     return false;
   }
 
@@ -211,16 +300,36 @@ $w.onReady(async () => {
     const foundElements = [];
     const missingElements = [];
     
+    // Debug: Let's also try without the # selector
+    sendDiscordLog(`🔍 DEBUG: Starting element audit with ${requiredElements.length} required elements...`);
+    
     requiredElements.forEach(elementId => {
       try {
+        // Try with # selector first
         const elements = $w(elementId);
         if (elements && elements.length > 0) {
           foundElements.push(elementId);
+          sendDiscordLog(`✅ FOUND: ${elementId} - element exists and accessible`);
         } else {
-          missingElements.push(elementId);
+          // Try without # selector as fallback
+          const elementIdNoHash = elementId.substring(1);
+          try {
+            const elementsNoHash = $w(`#${elementIdNoHash}`);
+            if (elementsNoHash && elementsNoHash.length > 0) {
+              foundElements.push(elementId);
+              sendDiscordLog(`✅ FOUND (no-hash): ${elementId} - element exists with fallback selector`);
+            } else {
+              missingElements.push(elementId);
+              sendDiscordLog(`❌ NOT FOUND: ${elementId} - element not accessible via $w()`);
+            }
+          } catch (e2) {
+            missingElements.push(elementId);
+            sendDiscordLog(`❌ ERROR: ${elementId} - ${e2.message}`);
+          }
         }
       } catch (e) {
         missingElements.push(`${elementId} (error: ${e.message})`);
+        sendDiscordLog(`❌ EXCEPTION: ${elementId} - ${e.message}`);
       }
     });
     
@@ -230,6 +339,41 @@ $w.onReady(async () => {
     
     if (missingElements.length > 0) {
       sendDiscordLog(`⚠️ CRITICAL: PayFast button functionality requires all elements to exist in HTML. Please add missing elements to the Sign-up page.`);
+    }
+    
+    // Additional debugging - try alternative methods to detect elements
+    sendDiscordLog(`🔬 DEEP DEBUG: Trying alternative element detection methods...`);
+    
+    // Try to get all elements on the page
+    try {
+      const allElements = $w('*');
+      sendDiscordLog(`📊 Total elements found on page: ${allElements.length}`);
+      
+      // Try to find elements by checking if they have IDs that match what we need
+      const buttonElements = allElements.filter(el => {
+        try {
+          return el.id && (
+            el.id.includes('Button') || 
+            el.id.includes('SignUp') || 
+            el.id.includes('Container') || 
+            el.id.includes('Text')
+          );
+        } catch (e) {
+          return false;
+        }
+      });
+      
+      sendDiscordLog(`🎯 Elements with relevant IDs: ${buttonElements.length}`);
+      buttonElements.forEach(el => {
+        try {
+          sendDiscordLog(`🔍 Found element with ID: ${el.id} (type: ${el.type || 'unknown'})`);
+        } catch (e) {
+          sendDiscordLog(`🔍 Found element but cannot read properties: ${e.message}`);
+        }
+      });
+      
+    } catch (e) {
+      sendDiscordLog(`❌ Cannot enumerate all elements: ${e.message}`);
     }
     
     return { found: foundElements, missing: missingElements };
