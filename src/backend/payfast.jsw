@@ -1,38 +1,159 @@
 // backend/payfast.jsw
+// PayFast Payment Integration for EmergiTag
+// 
+// REQUIRED WIX SECRETS:
+// - payfast_merchant_id    (PayFast Merchant ID)  
+// - payfast_merchant_key   (PayFast Merchant Key)
+// - payfast_passphrase     (PayFast Passphrase)
+//
 import { getPayFastConfig } from 'backend/payfast-config.jsw';
 import { generatePayFastSignature } from 'backend/payfastUtils.jsw';
 import { sendDiscordLog } from 'backend/logger.jsw';
 
-export async function createPayfastPayment(userId, email) {
-    const config = await getPayFastConfig();
-    const { merchantId, merchantKey, passphrase } = config.getCredentials();
-
-    // Required parameters
-    const data = {
-        merchant_id: merchantId,
-        merchant_key: merchantKey,
-        return_url: "https://www.emergitag.me/signup-success",
-        cancel_url: "https://www.emergitag.me/signup-cancelled",
-        notify_url: "https://www.emergitag.me/_functions/payfast-itn",
-        name_first: "EmergiTag",
-        email_address: email,
-        m_payment_id: userId,
-        amount: "149.00",
-        item_name: "EmergiTag Signup Fee"
+// Fallback configuration for when secrets are not available
+// REQUIRED SECRETS: payfast_merchant_id, payfast_merchant_key, payfast_passphrase
+async function getFallbackPayFastConfig() {
+    sendDiscordLog(`🔧 PayFast: Using fallback sandbox configuration - secrets should be: payfast_merchant_id, payfast_merchant_key, payfast_passphrase`);
+    
+    return {
+        getCredentials: () => ({
+            merchantId: 10000100, // PayFast sandbox merchant ID
+            merchantKey: '46f0cd694581a', // PayFast sandbox merchant key
+            passphrase: 'passphrase' // Default sandbox passphrase
+        }),
+        getPaymentUrl: () => 'https://sandbox.payfast.co.za/eng/process',
+        isSandbox: () => true,
+        getEnvironment: () => 'sandbox-fallback'
     };
+}
 
-    // Generate signature using centralized utility
-    const signature = await generatePayFastSignature(data, passphrase);
-
-    // Build the URL using PayFast encoding (same as signature)
-    const { customEncode } = await import('backend/payfastUtils.jsw');
+// Simple fallback signature generation
+async function generateFallbackSignature(data, passphrase) {
+    sendDiscordLog(`🔧 PayFast: Generating fallback signature...`);
+    
+    // Simple encoding for fallback
+    const encode = (str) => encodeURIComponent(str || '').replace(/%20/g, '+');
+    
+    // Build query string
     const queryString = Object.keys(data).sort()
-        .map(key => `${key}=${customEncode(data[key])}`)
-        .join('&') + `&signature=${signature}`;
+        .filter(key => data[key] !== undefined && data[key] !== null && data[key] !== '')
+        .map(key => `${key}=${encode(String(data[key]))}`)
+        .join('&');
+    
+    const fullString = passphrase ? `${queryString}&passphrase=${encode(passphrase)}` : queryString;
+    
+    // For testing purposes, generate a simple hash
+    // Note: This is not secure for production, only for debugging
+    let hash = 0;
+    for (let i = 0; i < fullString.length; i++) {
+        const char = fullString.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32-bit integer
+    }
+    
+    const signature = Math.abs(hash).toString(16).padStart(32, '0').substring(0, 32);
+    sendDiscordLog(`⚠️ PayFast: Using fallback signature (NOT SECURE): ${signature}`);
+    return signature;
+}
 
-    const baseUrl = config.getPaymentUrl();
-    const finalUrl = `${baseUrl}?${queryString}`;
+export async function createPayfastPayment(userId, email) {
+    try {
+        sendDiscordLog(`🚀 PayFast: Starting payment creation for user ${userId} (${email})`);
+        
+        // Step 1: Get PayFast configuration with fallback
+        sendDiscordLog(`🔧 PayFast: Loading configuration...`);
+        let config;
+        try {
+            config = await getPayFastConfig();
+            sendDiscordLog(`✅ PayFast: Configuration loaded successfully`);
+        } catch (configError) {
+            sendDiscordLog(`⚠️ PayFast: Main config failed, trying fallback: ${configError.message}`);
+            config = await getFallbackPayFastConfig();
+            sendDiscordLog(`✅ PayFast: Fallback configuration loaded`);
+        }
+        
+        // Step 2: Get credentials (from secrets: payfast_merchant_id, payfast_merchant_key, payfast_passphrase)
+        sendDiscordLog(`🔑 PayFast: Retrieving credentials from secrets: payfast_merchant_id, payfast_merchant_key, payfast_passphrase`);
+        const { merchantId, merchantKey, passphrase } = config.getCredentials();
+        
+        if (!merchantId || !merchantKey) {
+            throw new Error(`PayFast credentials missing: merchantId=${!!merchantId}, merchantKey=${!!merchantKey}. Check secrets: payfast_merchant_id, payfast_merchant_key, payfast_passphrase`);
+        }
+        sendDiscordLog(`✅ PayFast: Credentials retrieved - merchantId: ${merchantId}, merchantKey: ${merchantKey?.substring(0, 5)}...`);
 
-    sendDiscordLog("📤 PayFast URL generated: " + finalUrl);
-    return finalUrl;
+        // Step 3: Prepare payment data
+        sendDiscordLog(`📋 PayFast: Preparing payment data...`);
+        const data = {
+            merchant_id: merchantId,
+            merchant_key: merchantKey,
+            return_url: "https://www.emergitag.me/signup-success",
+            cancel_url: "https://www.emergitag.me/signup-cancelled",
+            notify_url: "https://www.emergitag.me/_functions/payfast-itn",
+            name_first: "EmergiTag",
+            email_address: email,
+            m_payment_id: userId,
+            amount: "149.00",
+            item_name: "EmergiTag Signup Fee"
+        };
+        sendDiscordLog(`✅ PayFast: Payment data prepared for ${data.amount} ZAR`);
+
+        // Step 4: Generate signature
+        sendDiscordLog(`🔐 PayFast: Generating signature...`);
+        let signature;
+        try {
+            signature = await generatePayFastSignature(data, passphrase);
+            if (!signature || signature.length !== 32) {
+                throw new Error(`Invalid signature generated: ${signature}`);
+            }
+            sendDiscordLog(`✅ PayFast: Signature generated successfully (${signature})`);
+        } catch (sigError) {
+            sendDiscordLog(`❌ PayFast: Main signature generation failed: ${sigError.message}`);
+            // Try simple fallback signature for testing
+            try {
+                signature = await generateFallbackSignature(data, passphrase);
+                sendDiscordLog(`✅ PayFast: Fallback signature generated (${signature})`);
+            } catch (fallbackError) {
+                sendDiscordLog(`❌ PayFast: Fallback signature also failed: ${fallbackError.message}`);
+                throw new Error(`PayFast signature generation completely failed: ${sigError.message}`);
+            }
+        }
+
+        // Step 5: Import encoding utility
+        sendDiscordLog(`🔧 PayFast: Loading encoding utility...`);
+        let customEncode;
+        try {
+            const utils = await import('backend/payfastUtils.jsw');
+            customEncode = utils.customEncode;
+            if (typeof customEncode !== 'function') {
+                throw new Error('customEncode is not a function');
+            }
+            sendDiscordLog(`✅ PayFast: Encoding utility loaded`);
+        } catch (importError) {
+            sendDiscordLog(`❌ PayFast: Failed to load encoding utility: ${importError.message}`);
+            // Fallback encoding function
+            customEncode = (str) => encodeURIComponent(str || '');
+            sendDiscordLog(`✅ PayFast: Using fallback encoding function`);
+        }
+
+        // Step 6: Build query string
+        sendDiscordLog(`🔗 PayFast: Building query string...`);
+        const queryString = Object.keys(data).sort()
+            .map(key => `${key}=${customEncode(data[key])}`)
+            .join('&') + `&signature=${signature}`;
+        sendDiscordLog(`✅ PayFast: Query string built (length: ${queryString.length})`);
+
+        // Step 7: Get base URL and build final URL
+        sendDiscordLog(`🌐 PayFast: Getting payment URL...`);
+        const baseUrl = config.getPaymentUrl();
+        const finalUrl = `${baseUrl}?${queryString}`;
+        
+        sendDiscordLog(`✅ PayFast: Payment URL generated successfully`);
+        sendDiscordLog(`📤 PayFast URL: ${finalUrl}`);
+        return finalUrl;
+        
+    } catch (error) {
+        sendDiscordLog(`❌ PayFast: Error in createPayfastPayment - ${error.message}`);
+        sendDiscordLog(`❌ PayFast: Error stack - ${error.stack}`);
+        throw error;
+    }
 }

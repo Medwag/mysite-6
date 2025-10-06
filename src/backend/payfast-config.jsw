@@ -1,5 +1,11 @@
 // backend/payfast-config.jsw
 // PayFast Configuration Management for EmergiTag
+//
+// REQUIRED WIX SECRETS:
+// - payfast_merchant_id    (PayFast Merchant ID - integer)
+// - payfast_merchant_key   (PayFast Merchant Key - string) 
+// - payfast_passphrase     (PayFast Passphrase - string)
+//
 import { getSecret } from 'wix-secrets-backend';
 
 /**
@@ -39,13 +45,13 @@ class PayFastConfig {
             
             this.config.environment = environment;
             
-            // Get credentials based on environment
-            const envPrefix = environment === 'live' ? 'payfastLive' : 'payfastSandbox';
-            
+            // Get credentials using the actual secret names
             try {
-                const merchantId = await getSecret(`${envPrefix}MerchantId`);
-                const merchantKey = await getSecret(`${envPrefix}MerchantKey`);
-                const passphrase = await getSecret(`${envPrefix}Passphrase`);
+                const merchantId = await getSecret("payfast_merchant_id");
+                const merchantKey = await getSecret("payfast_merchant_key");
+                const passphrase = await getSecret("payfast_passphrase");
+                
+                console.log(`[PayFast Config] Retrieved secrets - merchantId: ${merchantId}, merchantKey: ${merchantKey ? 'present' : 'missing'}, passphrase: ${passphrase ? 'present' : 'missing'}`);
                 
                 // Parse merchant ID to integer
                 this.config.merchantId = parseInt(merchantId, 10);
@@ -56,11 +62,11 @@ class PayFastConfig {
                 this.validateCredentials();
                 
                 this.isInitialized = true;
-                console.log(`[PayFast Config] ✅ Successfully initialized for ${environment} environment`);
+                console.log(`[PayFast Config] ✅ Successfully initialized with actual secrets`);
                 
             } catch (err) {
-                console.error(`[PayFast Config] ❌ Failed to load ${environment} credentials:`, err);
-                throw new Error(`PayFast ${environment} credentials not configured in Wix Secrets`);
+                console.error(`[PayFast Config] ❌ Failed to load PayFast credentials:`, err);
+                throw new Error(`PayFast credentials not configured in Wix Secrets. Required: payfast_merchant_id, payfast_merchant_key, payfast_passphrase`);
             }
             
         } catch (err) {
