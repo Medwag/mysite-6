@@ -1,4 +1,4 @@
-import wixData from 'wix-data';
+box61import wixData from 'wix-data';
 import wixSecretsBackend from 'wix-secrets-backend';
 import { ok, serverError, badRequest, response } from 'wix-http-functions';
 import { fetch } from 'wix-fetch';

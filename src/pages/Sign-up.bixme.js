@@ -132,13 +132,33 @@ $w.onReady(async () => {
     sendDiscordLog(`✅ PayFast payment function loaded successfully (function length: ${createPayfastPayment.length} parameters)`);
   }
   
-  // Helper function to safely manipulate elements with multiple selector attempts
+  // Helper function to safely manipulate elements with container-aware access
   function safeElementAction(elementId, action, description) {
-    // Try multiple selector variations
+    // Based on user report, try accessing elements through their containers
+    const elementName = elementId.startsWith('#') ? elementId.substring(1) : elementId;
+    
+    // Define known element locations based on user report
+    const elementContainers = {
+      'openSignUp': ['box61', '#box61'],
+      'goToDashboardButton': ['box61', '#box61'],
+      'paystackPayButton': ['formContainer01', '#formContainer01'],
+      'payfastPayButton': ['formContainer01', '#formContainer01'],
+      'goToSubscriptionButton': ['box61', '#box61'], // assumed same as other nav buttons
+    };
+    
+    // Try multiple selector variations including container-based access
     const selectors = [
       elementId.startsWith('#') ? elementId : `#${elementId}`,
       elementId.startsWith('#') ? elementId.substring(1) : elementId
     ];
+    
+    // Add container-based selectors if known
+    if (elementContainers[elementName]) {
+      elementContainers[elementName].forEach(container => {
+        selectors.push(`${container} #${elementName}`);
+        selectors.push(`${container} ${elementName}`);
+      });
+    }
     
     for (const selector of selectors) {
       try {
@@ -148,7 +168,7 @@ $w.onReady(async () => {
           if (element) {
             action(element);
             console.log(`✅ ${description} action completed with selector "${selector}"`);
-            sendDiscordLog(`✅ ${description} - SUCCESS with selector "${selector}"`);
+            sendDiscordLog(`✅ ${description} - SUCCESS with container-aware selector "${selector}"`);
             return true;
           }
         }
@@ -158,13 +178,17 @@ $w.onReady(async () => {
       }
     }
     
-    console.log(`⚠️ ${description} element not found with any selector`);
-    sendDiscordLog(`❌ ${description} - FAILED with selectors: ${selectors.join(', ')}`);
+    console.log(`⚠️ ${description} element not found with any selector including containers`);
+    sendDiscordLog(`❌ ${description} - FAILED with all selectors: ${selectors.join(', ')}`);
     return false;
   }
 
   // Initialize page elements with robust error handling
-  safeElementAction("#formContainer", (el) => el.collapse(), "formContainer collapse");
+  // User reports formContainer is actually formContainer01
+  const formContainerSuccess = safeElementAction("#formContainer01", (el) => el.collapse(), "formContainer01 collapse");
+  if (!formContainerSuccess) {
+    safeElementAction("#formContainer", (el) => el.collapse(), "formContainer collapse (fallback)");
+  }
   safeElementAction("#goToDashboardButton", (el) => el.hide(), "goToDashboardButton hide");
   safeElementAction("#goToSubscriptionButton", (el) => el.hide(), "goToSubscriptionButton hide");
   safeElementAction("#openSignUp", (el) => el.hide(), "openSignUp hide");
@@ -235,13 +259,32 @@ $w.onReady(async () => {
 
   // --- Button Listeners (with robust element validation) ---
   
-  // Helper function to safely attach event listeners with multiple selector attempts  
+  // Helper function to safely attach event listeners with container-aware access 
   function safeAttachClick(elementId, handler, description) {
-    // Try multiple selector variations
+    const elementName = elementId.startsWith('#') ? elementId.substring(1) : elementId;
+    
+    // Define known element locations based on user report
+    const elementContainers = {
+      'openSignUp': ['box61', '#box61'],
+      'goToDashboardButton': ['box61', '#box61'],
+      'paystackPayButton': ['formContainer01', '#formContainer01'],
+      'payfastPayButton': ['formContainer01', '#formContainer01'],
+      'goToSubscriptionButton': ['box61', '#box61'], // assumed same as other nav buttons
+    };
+    
+    // Try multiple selector variations including container-based access
     const selectors = [
       elementId.startsWith('#') ? elementId : `#${elementId}`,
       elementId.startsWith('#') ? elementId.substring(1) : elementId
     ];
+    
+    // Add container-based selectors if known
+    if (elementContainers[elementName]) {
+      elementContainers[elementName].forEach(container => {
+        selectors.push(`${container} #${elementName}`);
+        selectors.push(`${container} ${elementName}`);
+      });
+    }
     
     for (const selector of selectors) {
       try {
@@ -250,12 +293,12 @@ $w.onReady(async () => {
           const element = elements[0];
           if (element && typeof element.onClick === 'function') {
             element.onClick(handler);
-            console.log(`✅ ${description} onClick handler attached with selector "${selector}"`);
-            sendDiscordLog(`✅ ${description} - onClick SUCCESS with selector "${selector}"`);
+            console.log(`✅ ${description} onClick handler attached with container-aware selector "${selector}"`);
+            sendDiscordLog(`✅ ${description} - onClick SUCCESS with container selector "${selector}"`);
             return true;
           } else if (element) {
             console.log(`⚠️ ${description} found with "${selector}" but onClick method not available`);
-            sendDiscordLog(`⚠️ ${description} found but onClick unavailable (type: ${element.type || 'unknown'})`);
+            sendDiscordLog(`⚠️ ${description} found but onClick unavailable (type: ${element.type || 'unknown'}, container: ${selector.includes(' ') ? 'nested' : 'direct'})`);
           }
         }
       } catch (e) {
@@ -264,8 +307,8 @@ $w.onReady(async () => {
       }
     }
     
-    console.log(`❌ ${description} element not accessible with any selector`);
-    sendDiscordLog(`❌ ${description} - onClick FAILED with selectors: ${selectors.join(', ')}`);
+    console.log(`❌ ${description} element not accessible with any container-aware selector`);
+    sendDiscordLog(`❌ ${description} - onClick FAILED with all selectors: ${selectors.join(', ')}`);
     return false;
   }
 
@@ -298,9 +341,9 @@ $w.onReady(async () => {
       '#openSignUp',
       '#paystackPayButton',
       '#payfastPayButton',
-      '#formContainer',
-      '#statusText',
-      '#submitFormButton'
+      '#formContainer', // This is likely formContainer01 based on user report
+      '#statusText'
+      // Removed #submitFormButton - user is correct, payment buttons handle form submission
     ];
     
     const foundElements = [];
@@ -350,10 +393,42 @@ $w.onReady(async () => {
     // Additional debugging - try alternative methods to detect elements
     sendDiscordLog(`🔬 DEEP DEBUG: Trying alternative element detection methods...`);
     
-    // Try to get all elements on the page
+    // Try to get all elements on the page including nested containers
     try {
       const allElements = $w('*');
       sendDiscordLog(`📊 Total elements found on page: ${allElements.length}`);
+      
+      // Check specific containers mentioned by user
+      const containerTests = [
+        'box61',
+        'formContainer01', 
+        'formContainer',
+        '#box61',
+        '#formContainer01',
+        '#formContainer'
+      ];
+      
+      sendDiscordLog(`🔍 CONTAINER ACCESS TEST:`);
+      containerTests.forEach(containerId => {
+        try {
+          const container = $w(containerId);
+          if (container && container.length > 0) {
+            sendDiscordLog(`✅ CONTAINER FOUND: "${containerId}" - accessible`);
+            
+            // Try to access child elements within this container
+            try {
+              const children = container.children || [];
+              sendDiscordLog(`📦 Container "${containerId}" has ${children.length} children`);
+            } catch (childError) {
+              sendDiscordLog(`📦 Container "${containerId}" children not accessible: ${childError.message}`);
+            }
+          } else {
+            sendDiscordLog(`❌ CONTAINER NOT FOUND: "${containerId}"`);
+          }
+        } catch (e) {
+          sendDiscordLog(`❌ CONTAINER ERROR: "${containerId}" - ${e.message}`);
+        }
+      });
       
       // Log ALL element IDs to see what's actually on the page
       const elementsWithIds = allElements.filter(el => {
@@ -365,7 +440,7 @@ $w.onReady(async () => {
       });
       
       sendDiscordLog(`🔍 ALL ELEMENT IDs ON PAGE (${elementsWithIds.length} elements):`);
-      elementsWithIds.forEach((el, index) => {
+      elementsWithIds.slice(0, 20).forEach((el, index) => {
         try {
           const elementInfo = `${index + 1}. ID: "${el.id}" | Type: ${el.type || 'unknown'}`;
           sendDiscordLog(elementInfo);
@@ -373,6 +448,10 @@ $w.onReady(async () => {
           sendDiscordLog(`${index + 1}. ID: [error reading] | Error: ${e.message}`);
         }
       });
+      
+      if (elementsWithIds.length > 20) {
+        sendDiscordLog(`... and ${elementsWithIds.length - 20} more elements`);
+      }
       
       // Also try to find elements by checking if they have IDs that match what we need
       const buttonElements = allElements.filter(el => {
