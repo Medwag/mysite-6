@@ -56,9 +56,19 @@ async function generateFallbackSignature(data, passphrase) {
     return signature;
 }
 
+// Simple test function to verify backend connectivity
+export async function testPayfastConnection() {
+    try {
+        await sendDiscordLog(`🧪 PayFast: Test connection successful`);
+        return "PayFast backend connection OK";
+    } catch (error) {
+        throw new Error(`PayFast backend test failed: ${error.message}`);
+    }
+}
+
 export async function createPayfastPayment(userId, email) {
     try {
-        sendDiscordLog(`🚀 PayFast: Starting payment creation for user ${userId} (${email})`);
+        await sendDiscordLog(`🚀 PayFast: Starting payment creation for user ${userId} (${email})`);
         
         // Step 1: Get PayFast configuration with fallback
         sendDiscordLog(`🔧 PayFast: Loading configuration...`);

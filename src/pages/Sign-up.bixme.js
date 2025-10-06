@@ -7,7 +7,7 @@ import wixLocation from 'wix-location';
 import wixWindow from 'wix-window';
 import wixData from 'wix-data';
 import { createPaystackPayment } from 'backend/paystack.jsw';
-import { createPayfastPayment } from 'backend/payfast.jsw';
+import { createPayfastPayment, testPayfastConnection } from 'backend/payfast.jsw';
 import { getUserPaymentStatus } from 'backend/status.jsw';
 import { sendDiscordLog } from 'backend/logger.jsw';
 
@@ -31,16 +31,26 @@ $w.onReady(async () => {
   const imports = { 
     createPaystackPayment: typeof createPaystackPayment, 
     createPayfastPayment: typeof createPayfastPayment,
+    testPayfastConnection: typeof testPayfastConnection,
     getUserPaymentStatus: typeof getUserPaymentStatus,
     sendDiscordLog: typeof sendDiscordLog
   };
   console.log("📦 Imports check:", imports);
   
+  // Test PayFast backend connection
+  try {
+    const testResult = await testPayfastConnection();
+    sendDiscordLog(`✅ PayFast backend test passed: ${testResult}`);
+  } catch (testError) {
+    sendDiscordLog(`❌ PayFast backend test failed: ${testError.message}`);
+  }
+  
   // Discord notification about import status
   if (imports.createPayfastPayment !== 'function') {
     sendDiscordLog(`❌ CRITICAL: PayFast payment function not properly imported (type: ${imports.createPayfastPayment})`);
+    sendDiscordLog(`🔍 Available methods on createPayfastPayment: ${Object.getOwnPropertyNames(createPayfastPayment || {})}`);
   } else {
-    sendDiscordLog(`✅ PayFast payment function loaded successfully`);
+    sendDiscordLog(`✅ PayFast payment function loaded successfully (function length: ${createPayfastPayment.length} parameters)`);
   }
   
   // Helper function to safely manipulate elements
@@ -226,9 +236,24 @@ async function handlePayfastSignup(userId, email) {
     }
     
     console.log("🔗 Calling createPayfastPayment...");
-    sendDiscordLog(`🔗 PayFast: Generating payment URL for user ${userId} (${email})`);
+    sendDiscordLog(`🔗 PayFast: About to call createPayfastPayment function for user ${userId} (${email})`);
     
-    const url = await createPayfastPayment(userId, email);
+    let url;
+    try {
+      sendDiscordLog(`🔧 PayFast: Executing createPayfastPayment(${userId}, ${email})`);
+      url = await createPayfastPayment(userId, email);
+      sendDiscordLog(`🎯 PayFast: createPayfastPayment returned: ${url}`);
+    } catch (createError) {
+      sendDiscordLog(`💥 PayFast: createPayfastPayment function threw error: ${createError.message}`);
+      sendDiscordLog(`💥 PayFast: Error name: ${createError.name}`);
+      sendDiscordLog(`💥 PayFast: Error stack: ${createError.stack}`);
+      throw createError; // Re-throw to be caught by outer catch
+    }
+    
+    if (!url) {
+      throw new Error('PayFast payment URL is empty or undefined');
+    }
+    
     console.log("✅ PayFast URL generated:", url);
     sendDiscordLog(`✅ PayFast payment URL generated successfully for user ${userId}: ${url}`);
     
