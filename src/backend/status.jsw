@@ -10,7 +10,8 @@ export async function getUserPaymentStatus(userId, email) {
       signupSource: null,
       signupDate: null,
       signupAmount: null,
-      hasSubscription: false,
+      hasSubscription: false, // TRUE only if membership tier is selected AND confirmed as paid
+      hasMembershipTierSelected: false, // TRUE if membership tier is selected (regardless of payment)
       subscriptionSource: null,
       membershipTier: null,
     };
@@ -35,10 +36,19 @@ export async function getUserPaymentStatus(userId, email) {
         status.signupAmount = 150.0;
       }
 
+      // Check membership tier selection and payment status
       if (profile.membershipTier) {
-        status.hasSubscription = true;
-        status.subscriptionSource = "CMS";
+        status.hasMembershipTierSelected = true;
         status.membershipTier = profile.membershipTier;
+        
+        if (profile.subscriptionActive === true) {
+          // Membership tier selected AND confirmed as paid
+          status.hasSubscription = true;
+          status.subscriptionSource = "CMS";
+        } else {
+          // Membership tier selected but NOT confirmed/paid
+          status.hasSubscription = false;
+        }
       }
     }
 
@@ -72,6 +82,7 @@ export async function getUserPaymentStatus(userId, email) {
     return {
       hasSignUpPaid: false,
       hasSubscription: false,
+      hasMembershipTierSelected: false,
       error: err.message,
     };
   }

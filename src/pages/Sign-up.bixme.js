@@ -32,6 +32,8 @@ $w.onReady(async () => {
   $w("#goToDashboardButton").hide();
   $w("#goToSubscriptionButton").hide();
   $w("#openSignUp").hide();
+  $w("#paystackPayButton").hide();
+  $w("#payfastPayButton").hide();
   $w("#statusText").text = "Checking your sign-up status...";
 
   const user = wixUsers.currentUser;
@@ -55,19 +57,30 @@ $w.onReady(async () => {
 
   // --- Logic Branching ---
   if (status.hasSignUpPaid && status.hasSubscription) {
-    // ✅ User fully onboarded
+    // ✅ SCENARIO 1: Sign up paid AND membership tier selected and confirmed as paid
+    // SHOW: goToDashboardButton ONLY
     $w("#goToDashboardButton").show();
-    $w("#statusText").text = `✅ Welcome back! Sign-up confirmed via ${status.signupSource} on ${formatDate(status.signupDate)}.`;
+    // Payment buttons hidden (sign-up already paid)
+    $w("#statusText").text = `✅ Welcome back! Sign-up confirmed via ${status.signupSource}. Active ${status.membershipTier} membership.`;
   } 
   else if (status.hasSignUpPaid && !status.hasSubscription) {
-    // ⚠️ Sign-up done, but no subscription yet
+    // ⚠️ SCENARIO 2: Sign up paid and confirmed BUT membership tier NOT selected/paid/confirmed
+    // SHOW: goToSubscriptionButton ONLY
     $w("#goToSubscriptionButton").show();
-    $w("#statusText").text = `✅ Sign-up confirmed (${status.signupSource}), but no active subscription found.`;
+    // Payment buttons hidden (sign-up already paid)
+    if (status.hasMembershipTierSelected) {
+      $w("#statusText").text = `✅ Sign-up confirmed (${status.signupSource}), but ${status.membershipTier} membership needs payment confirmation.`;
+    } else {
+      $w("#statusText").text = `✅ Sign-up confirmed (${status.signupSource}), but no membership tier selected yet.`;
+    }
   } 
   else {
-    // 📝 No payment yet
+    // 📝 SCENARIO 3: Sign up fee NOT paid or cannot be confirmed
+    // SHOW: openSignUp AND payment gateway buttons
     $w("#openSignUp").show();
-    $w("#statusText").text = "📝 Please complete your sign-up below.";
+    $w("#paystackPayButton").show();
+    $w("#payfastPayButton").show();
+    $w("#statusText").text = "📝 Please complete your sign-up payment below using Paystack or PayFast.";
   }
 
   // --- Button Listeners ---
