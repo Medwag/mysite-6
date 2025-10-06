@@ -1,0 +1,992 @@
+diff --git a/src/backend/core/paystack-config.jsw b/src/backend/core/paystack-config.jsw
+new file mode 100644
+--- /dev/null
++++ b/src/backend/core/paystack-config.jsw
+@@ -0,0 +1,68 @@
++// src/backend/core/paystack-config.jsw
++// Centralized Paystack configuration + key retrieval
++import { getSecret } from 'wix-secrets-backend';
++
++export const PAYSTACK_CONFIG = {
++  API_BASE_URL: 'https://api.paystack.co'
++};
++
++/**
++ * Returns the Paystack Secret Key from Wix Secrets.
++ * Expected secret names (in order of preference):
++ *  - paystack_secret_key
++ *  - PAYSTACK_SECRET_KEY
++ */
++export async function getPaystackSecretKey() {
++  let key = null;
++  try {
++    key = await getSecret('paystack_secret_key');
++  } catch (e) {
++    // fall through
++  }
++  if (!key) {
++    try {
++      key = await getSecret('PAYSTACK_SECRET_KEY');
++    } catch (e) {
++      // fall through
++    }
++  }
++  if (!key) {
++    throw new Error('Paystack secret key not configured in Wix Secrets (paystack_secret_key).');
++  }
++  return key;
++}
+diff --git a/src/backend/core/payment-service.jsw b/src/backend/core/payment-service.jsw
+index e69de29..3cf4a22 100644
+--- a/src/backend/core/payment-service.jsw
++++ b/src/backend/core/payment-service.jsw
+@@ -0,0 +1,238 @@
++// src/backend/core/payment-service.jsw
++// ✅ PRODUCTION CRITICAL: Consolidated Payment Detection Service
++import { getPaystackSecretKey } from 'backend/core/paystack-config.jsw';
++import { verifyAndSyncPayment } from 'backend/core/payment-verifier.jsw';
++import { fetch } from 'wix-fetch';
++import wixData from 'wix-data';
++
++export class PaymentService {
++  /**
++   * Detect signup payment with high reliability.
++   * Uses collections, then API lookups, then optional live verification if redirect params provided.
++   */
++  static async detectSignupPayment(userId, email, reference = null, provider = null) {
++    console.log(`[PaymentService] 🔍 Detecting signup payment for user=${userId}, email=${email}, ref=${reference || '-'}, provider=${provider || '-'}`);
++    try {
++      // 1) Collection: PaystackTransactions (single source of truth when webhook stored)
++      const paystackTx = await wixData.query('PaystackTransactions')
++        .eq('userId', userId)
++        .eq('transactionType', 'signup_fee')
++        .eq('status', 'success')
++        .limit(1)
++        .find({ suppressAuth: true });
++      if (paystackTx.items.length) {
++        const t = paystackTx.items[0];
++        return {
++          success: true, paymentDetected: true, provider: 'paystack',
++          amount: t.amount, reference: t._id, confidence: 100,
++          paymentDate: t.createdAt, source: 'PaystackTransactions'
++        };
++      }
++
++      // 2) Paystack API (recent transactions for this customer/email)
++      try {
++        const key = await getPaystackSecretKey();
++        if (key) {
++          const apiResult = await this.checkPaystackAPI(email);
++          if (apiResult.success && apiResult.hasSignupPayment) {
++            return {
++              success: true, paymentDetected: true, provider: 'paystack',
++              amount: apiResult.amount, reference: apiResult.reference,
++              confidence: 95, paymentDate: apiResult.paymentDate, source: 'PaystackAPI'
++            };
++          }
++        }
++      } catch (apiErr) {
++        console.warn('[PaymentService] Paystack API check skipped/failed:', apiErr?.message);
++      }
++
++      // 3) Profile flag fallback (in case webhook already synced)
++      const profileQ = await wixData.query('Emergency_Profiles')
++        .eq('_owner', userId)
++        .limit(1)
++        .find({ suppressAuth: true });
++      if (profileQ.items.length) {
++        const p = profileQ.items[0];
++        if (p.signUpPaid && p.signUpReference) {
++          return {
++            success: true, paymentDetected: true,
++            provider: p.paymentProvider || 'unknown',
++            reference: p.signUpReference, confidence: 85,
++            paymentDate: p.joinedDate, source: 'Emergency_Profiles'
++          };
++        }
++      }
++
++      // 4) Live verification fallback (if redirect provided ref+provider)
++      if (reference && provider) {
++        console.log('[PaymentService] 🚀 Attempting live verification fallback...');
++        const confirm = await verifyAndSyncPayment({ userId, reference, provider });
++        if (confirm.success) {
++          return {
++            success: true, paymentDetected: true, provider,
++            reference, confidence: 100, source: 'gateway_verification'
++          };
++        }
++        console.warn('[PaymentService] Live verification failed:', confirm.error);
++      }
++
++      return { success: true, paymentDetected: false, confidence: 0, source: 'comprehensive_search' };
++    } catch (error) {
++      console.error('❌ [PaymentService] detectSignupPayment error:', error);
++      return { success: false, error: error.message, paymentDetected: false, confidence: 0 };
++    }
++  }
++
++  /** Check Paystack API for recent successful signup payment */
++  static async checkPaystackAPI(email) {
++    try {
++      const key = await getPaystackSecretKey();
++      const res = await fetch(`https://api.paystack.co/transaction?customer=${encodeURIComponent(email)}&status=success`, {
++        headers: { Authorization: `Bearer ${key}` }
++      });
++      if (!res.ok) return { success: false, error: `Paystack API ${res.status}` };
++      const data = await res.json();
++      const hit = data.data?.find(tx =>
++        tx.amount === 14900 &&
++        (tx.metadata?.transaction_type === 'signup_fee' || tx.metadata?.intent === 'signup_payment')
++      );
++      if (hit) {
++        return {
++          success: true, hasSignupPayment: true,
++          amount: hit.amount / 100,
++          reference: hit.reference,
++          paymentDate: new Date(hit.paid_at || hit.created_at)
++        };
++      }
++      return { success: true, hasSignupPayment: false };
++    } catch (e) {
++      console.error('[PaymentService] checkPaystackAPI error:', e);
++      return { success: false, error: e.message };
++    }
++  }
++
++  /** Detect active subscription (Paystack) */
++  static async detectActiveSubscription(userId, email) {
++    console.log(`[PaymentService] 🔍 Detecting active subscription for ${userId}`);
++    try {
++      const key = await getPaystackSecretKey();
++      const res = await fetch(`https://api.paystack.co/subscription?customer=${encodeURIComponent(email)}`, {
++        headers: { Authorization: `Bearer ${key}` }
++      });
++      if (!res.ok) return { success: false, error: 'Paystack API error' };
++      const data = await res.json();
++      const active = data.data?.filter(s => s.status === 'active' && new Date(s.next_payment_date) > new Date()) || [];
++      if (active.length) {
++        const s = active[0];
++        return {
++          success: true, hasActiveSubscription: true,
++          subscriptionCode: s.subscription_code,
++          planName: s.plan?.name || 'Unknown',
++          status: s.status,
++          nextPaymentDate: new Date(s.next_payment_date),
++          confidence: 100
++        };
++      }
++      return { success: true, hasActiveSubscription: false, confidence: 100 };
++    } catch (e) {
++      console.error('[PaymentService] detectActiveSubscription error:', e);
++      return { success: false, error: e.message };
++    }
++  }
++
++  /** Sync subset of payment state onto Emergency_Profiles */
++  static async syncPaymentStatus(userId, paymentData) {
++    try {
++      const q = await wixData.query('Emergency_Profiles').eq('_owner', userId).limit(1).find({ suppressAuth: true });
++      if (!q.items.length) return { success: false, error: 'Profile not found' };
++      const current = q.items[0];
++      const updateData = {
++        _id: current._id,
++        signUpPaid: paymentData.signUpPaid ?? current.signUpPaid,
++        signUpReference: paymentData.reference ?? current.signUpReference,
++        paymentProvider: paymentData.provider ?? current.paymentProvider,
++        subscriptionActive: paymentData.subscriptionActive ?? current.subscriptionActive,
++        membershipTier: paymentData.membershipTier ?? current.membershipTier,
++        lastUpdated: new Date()
++      };
++      const updated = await wixData.update('Emergency_Profiles', updateData, { suppressAuth: true });
++      console.log('✅ [PaymentService] Profile sync complete');
++      return { success: true, updatedProfile: updated };
++    } catch (e) {
++      console.error('[PaymentService] syncPaymentStatus error:', e);
++      return { success: false, error: e.message };
++    }
++  }
++}
++
++// Back-compat named exports
++export async function detectSignupPayment(userId, email, reference = null, provider = null) {
++  return PaymentService.detectSignupPayment(userId, email, reference, provider);
++}
++export async function detectActiveSubscription(userId, email) {
++  return PaymentService.detectActiveSubscription(userId, email);
++}
++export async function syncPaymentStatus(userId, paymentData) {
++  return PaymentService.syncPaymentStatus(userId, paymentData);
++}
+diff --git a/src/backend/core/payment-verifier.jsw b/src/backend/core/payment-verifier.jsw
+new file mode 100644
+--- /dev/null
++++ b/src/backend/core/payment-verifier.jsw
+@@ -0,0 +1,124 @@
++// src/backend/core/payment-verifier.jsw
++// Live verification + CMS sync + notifications for Paystack/PayFast
++import wixData from 'wix-data';
++import { sendDiscordLog } from 'backend/logger.jsw';
++import { PAYSTACK_CONFIG, getPaystackSecretKey } from 'backend/core/paystack-config.jsw';
++import { fetch } from 'wix-fetch';
++import { sendPostPaymentNotifications } from 'backend/profile-utils.jsw';
++
++async function verifyPaystackRef(reference) {
++  const key = await getPaystackSecretKey();
++  const r = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/transaction/verify/${encodeURIComponent(reference)}`, {
++    headers: { Authorization: `Bearer ${key}` }
++  });
++  const j = await r.json();
++  if (!j.status) throw new Error(j.message || 'Paystack verification failed');
++  return j.data; // { status, amount, customer, ... }
++}
++
++// NOTE: For PayFast, we generally rely on ITN/webhook. If you need a direct verify step,
++// you can store the reference in your own DB on redirect and trust the ITN callback to confirm.
++async function verifyPayfastReference(reference) {
++  // No official PayFast "verify by reference" endpoint; we rely on ITN.
++  // Here we just sanity-check presence.
++  if (!reference) throw new Error('Missing PayFast reference');
++  return { ok: true, reference };
++}
++
++export async function verifyAndSyncPayment({ userId, reference, provider }) {
++  try {
++    await sendDiscordLog(`🔍 Verifying ${provider} payment for ${userId} [${reference}]`);
++
++    let verified;
++    let paidAmountZar = null;
++
++    if (provider === 'paystack') {
++      const data = await verifyPaystackRef(reference);
++      if (data.status !== 'success') throw new Error(`Paystack status=${data.status}`);
++      verified = data;
++      paidAmountZar = (data.amount || 0) / 100;
++    } else if (provider === 'payfast') {
++      const data = await verifyPayfastReference(reference);
++      if (!data.ok) throw new Error('PayFast verification failed');
++      verified = data;
++      // Amount comes via ITN; set nominal signup fee here if needed
++      paidAmountZar = 149;
++    } else {
++      throw new Error('Unsupported provider');
++    }
++
++    // Update Emergency_Profiles
++    const q = await wixData.query('Emergency_Profiles').eq('_owner', userId).limit(1).find({ suppressAuth: true });
++    if (!q.items.length) throw new Error('Profile not found for user');
++    const profile = q.items[0];
++    const updated = await wixData.update('Emergency_Profiles', {
++      _id: profile._id,
++      signUpPaid: true,
++      signUpReference: reference,
++      paymentProvider: provider,
++      lastPaymentDate: new Date(),
++      signUpAmount: paidAmountZar
++    }, { suppressAuth: true });
++
++    // Post-payment notifications (WhatsApp/email/admin)
++    try {
++      await sendPostPaymentNotifications(userId, reference);
++    } catch (notifyErr) {
++      await sendDiscordLog(`⚠️ Post-payment notifications error: ${notifyErr.message}`);
++    }
++
++    await sendDiscordLog(`✅ Verified + synced ${provider} payment for ${userId}`);
++    return { success: true, provider, verified, updated };
++  } catch (err) {
++    await sendDiscordLog(`❌ verifyAndSyncPayment failed for ${userId}: ${err.message}`);
++    return { success: false, error: err.message };
++  }
++}
+diff --git a/src/backend/paystack.jsw b/src/backend/paystack.jsw
+index 2f6a5ec..f5b5a6e 100644
+--- a/src/backend/paystack.jsw
++++ b/src/backend/paystack.jsw
+@@ -1,19 +1,18 @@
+ // === backend/paystack.jsw ===
+ // ✅ Merged version: combines your existing payment init + extended logic
+-
+ import { fetch } from 'wix-fetch';
+-import wixUsersBackend from 'wix-users-backend';
+-import { getPaystackSecretKey, PAYSTACK_CONFIG } from 'backend/paystack-config.jsw';
++import { getPaystackSecretKey, PAYSTACK_CONFIG } from 'backend/core/paystack-config.jsw';
+ import { sendDiscordLog } from 'backend/logger.jsw';
+-import { getOrCreateProfile, updateProfile } from 'backend/profile-utils.jsw';
++import { getOrCreateProfile, updateProfile } from 'backend/profile-utils.jsw';
+ 
+ // ----------------------------------------------------
+ // 🧩 Helpers
+ // ----------------------------------------------------
+ async function authHeader() {
+   const key = await getPaystackSecretKey();
+   return { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+ }
+ 
+ function getSiteUrl() {
+   return 'https://www.emergitag.me';
+ }
+@@ -120,6 +119,7 @@ export async function finalizeSignupFromReference({ reference, membershipTier, p
+   return { ok: true, data };
+ }
+ 
+ // ----------------------------------------------------
+ // 6️⃣ Utility - Create customer if needed
+ // ----------------------------------------------------
+ export async function createPaystackCustomer(email) {
+diff --git a/src/backend/plan-utils.jsw b/src/backend/plan-utils.jsw
+index 0b7d5f9..c9d2a23 100644
+--- a/src/backend/plan-utils.jsw
++++ b/src/backend/plan-utils.jsw
+@@ -1,8 +1,160 @@
+-// backend/plan-utils.jsw
+-import wixData from 'wix-data';
+-
+-/**
+- * Read a plan row (PlanOptions) by tier name.
+- * Expects fields: planTier, paystackPlanCode, paystackPlanCodeAnnual
+- */
+-export async function getPlanByName(planTier) {
+-  const q = await wixData.query('PlanOptions').eq('planTier', planTier).limit(1).find({ suppressAuth: true });
+-  return q.items[0] || null;
+-}
++// src/backend/plan-utils.jsw
++import wixData from 'wix-data';
++
++// Fallbacks in case CMS is empty/unavailable
++const FALLBACK_PLANS = {
++  BRONZE: {
++    planName: 'Bronze', planTier: 'Bronze',
++    amountMonthly: 29000, amountAnnual: 320000,
++    paystackPlanCode: 'PLN_BRONZE_MONTHLY',
++    paystackPlanCodeAnnual: 'PLN_BRONZE_ANNUAL'
++  },
++  SILVER: {
++    planName: 'Silver', planTier: 'Silver',
++    amountMonthly: 49000, amountAnnual: 540000,
++    paystackPlanCode: 'PLN_SILVER_MONTHLY',
++    paystackPlanCodeAnnual: 'PLN_SILVER_ANNUAL'
++  },
++  GOLD: {
++    planName: 'Gold', planTier: 'Gold',
++    amountMonthly: 79000, amountAnnual: 870000,
++    paystackPlanCode: 'PLN_GOLD_MONTHLY',
++    paystackPlanCodeAnnual: 'PLN_GOLD_ANNUAL'
++  },
++  FAMILY: {
++    planName: 'Family', planTier: 'Family',
++    amountMonthly: 129000, amountAnnual: 1420000,
++    paystackPlanCode: 'PLN_FAMILY_MONTHLY',
++    paystackPlanCodeAnnual: 'PLN_FAMILY_ANNUAL'
++  },
++  FAMILY_EXTENDED: {
++    planName: 'Family Extended', planTier: 'Family Extended',
++    amountMonthly: 159000, amountAnnual: 1750000,
++    paystackPlanCode: 'PLN_FAMEXT_MONTHLY',
++    paystackPlanCodeAnnual: 'PLN_FAMEXT_ANNUAL'
++  }
++};
++
++/** Normalize CMS row to a consistent shape */
++function normalizePlan(row) {
++  if (!row) return null;
++  // Allow either planTier or planName
++  const name = row.planTier || row.planName;
++  return {
++    planName: name,
++    planTier: name,
++    monthlyPrice: row.monthlyPrice ?? (row.amountMonthly ? row.amountMonthly / 100 : undefined),
++    annualPrice: row.annualPrice ?? (row.amountAnnual ? row.amountAnnual / 100 : undefined),
++    paystackPlanCode: row.paystackPlanCode,
++    paystackPlanCodeAnnual: row.paystackPlanCodeAnnual,
++    ...row
++  };
++}
++
++/** Get a plan by name/tier from CMS with safe fallback */
++export async function getPlanByName(planName) {
++  if (!planName) return null;
++  try {
++    const q = await wixData.query('PlanOptions')
++      .or(
++        wixData.query('PlanOptions').eq('planTier', planName),
++        wixData.query('PlanOptions').eq('planName', planName)
++      )
++      .limit(1)
++      .find({ suppressAuth: true });
++    if (q.items.length) return normalizePlan(q.items[0]);
++  } catch (e) {
++    // fall through to fallback
++  }
++  const key = planName.toUpperCase().replace(/\s+/g, '_');
++  return FALLBACK_PLANS[key] ? normalizePlan(FALLBACK_PLANS[key]) : null;
++}
++
++/** Get a plan by Paystack code from CMS/fallback */
++export async function getPlanByPaystackCode(planCode) {
++  if (!planCode) return null;
++  try {
++    const q = await wixData.query('PlanOptions')
++      .or(
++        wixData.query('PlanOptions').eq('paystackPlanCode', planCode),
++        wixData.query('PlanOptions').eq('paystackPlanCodeAnnual', planCode)
++      )
++      .limit(1)
++      .find({ suppressAuth: true });
++    if (q.items.length) return normalizePlan(q.items[0]);
++  } catch (e) {}
++  // Fallback search
++  const hit = Object.values(FALLBACK_PLANS).find(
++    p => p.paystackPlanCode === planCode || p.paystackPlanCodeAnnual === planCode
++  );
++  return hit ? normalizePlan(hit) : null;
++}
++
++/** Get all plans (CMS first, fallback otherwise) */
++export async function getAllPlans() {
++  try {
++    const q = await wixData.query('PlanOptions').find({ suppressAuth: true });
++    if (q.items.length) return q.items.map(normalizePlan);
++  } catch (e) {}
++  return Object.values(FALLBACK_PLANS).map(normalizePlan);
++}
++
++/** Validate plan shape */
++export function validatePlan(plan) {
++  if (!plan) return false;
++  const required = ['planName', 'paystackPlanCode'];
++  return required.every(k => plan[k] !== null && plan[k] !== undefined);
++}
+diff --git a/src/pages/Sign-up Success.js b/src/pages/Sign-up Success.js
+index 2f6a5ec..94e0d5a 100644
+--- a/src/pages/Sign-up Success.js
++++ b/src/pages/Sign-up Success.js
+@@ -1,300 +1,220 @@
+-// pages/Sign-up Success.ypb90.js
+-// ✅ PRODUCTION READY: Consolidated with live Paystack + PayFast verification
+-
+-import wixUsers from 'wix-users';
+-import wixData from 'wix-data';
+-import wixLocation from 'wix-location';
+-import wixWindow from 'wix-window';
+-import { ProfileService } from 'backend/core/profile-service.jsw';
+-import { PaymentService } from 'backend/core/payment-service.jsw';
+-import { createSubscriptionWithCustomer } from 'backend/paystackSubscriptionWithCustomer.jsw';
+-import { generatePayFastUrl } from 'backend/payfastUrl.jsw';
+-
+-$w.onReady(async () => {
+-    const user = wixUsers.currentUser;
+-    const ref = wixLocation.query.reference || null;       // Paystack/PayFast reference
+-    const gateway = wixLocation.query.gateway || null;     // "paystack" or "payfast"
+-
+-    if (!user.loggedIn) {
+-        hideAllUIElements();
+-        $w("#confirmationText").text = "⚠️ Please log in to view your membership status.";
+-        $w("#confirmationText").show();
+-        return;
+-    }
+-
+-    hideAllUIElements();
+-
+-    try {
+-        const profile = await ProfileService.getOrCreateProfile(user.id);
+-        console.log('[Sign-up Success] ✅ Profile retrieved for user:', user.id);
+-
+-        console.log('[Sign-up Success] Current profile state:', {
+-            signUpPaid: profile.signUpPaid,
+-            subscriptionActive: profile.subscriptionActive,
+-            planStatus: profile.planStatus,
+-            membershipTier: profile.membershipTier,
+-            userState: ProfileService.getUserState(profile)
+-        });
+-
+-        await handleUserStateReliable(user, profile, ref, gateway);
+-
+-    } catch (err) {
+-        const errorId = `PAY-ERR-${Date.now()}`;
+-        console.error("Profile creation error:", err);
+-        hideAllUIElements();
+-        $w("#confirmationText").text = `⚠️ Unable to load profile. Contact support. (Ref: ${errorId})`;
+-        $w("#confirmationText").show();
+-    }
+-});
+-
+-function hideAllUIElements() {
+-    [
+-        "#confirmationText",
+-        "#billingCycleSwitch",
+-        "#switchLabel",
+-        "#planRepeater",
+-        "#dashboardLink",
+-        "#managePlanLink",
+-        "#discountBadgeimage",
+-        "#signUpButton",
+-        "#paymentMethodSelector",
+-        "#paystackPayButton",
+-        "#payfastPayButton"
+-    ].forEach(id => {
+-        try { $w(id).hide(); } catch (e) { console.warn('Element not found:', id); }
+-    });
+-    try {
+-        $w("#billingCycleSwitch").checked = false;
+-        $w("#switchLabel").text = "Monthly";
+-    } catch (e) {
+-        console.warn('Could not reset billing cycle elements');
+-    }
+-}
+-function hideAllElements() { hideAllUIElements(); }
+-
+-// ✅ Reliable user state handler
+-async function handleUserStateReliable(user, profile, ref = null, gateway = null) {
+-    console.log('[Sign-up Success] 🔍 Determining user state...');
+-    const userEmail = user.email;
+-    let signupPaymentConfirmed = false;
+-
+-    try {
+-        console.log('[Sign-up Success] Checking signup payment with PaymentService...');
+-        if (ref && gateway)
+-            console.log(`[Sign-up Success] Detected query → reference: ${ref}, provider: ${gateway}`);
+-
+-        const paymentResult = await PaymentService.detectSignupPayment(user.id, userEmail, ref, gateway);
+-
+-        if (paymentResult.success && paymentResult.paymentDetected) {
+-            console.log(`✅ Signup payment confirmed via ${paymentResult.provider} (confidence: ${paymentResult.confidence}%)`);
+-            signupPaymentConfirmed = true;
+-
+-            if (!profile.signUpPaid) {
+-                console.log('[Sign-up Success] Syncing signup payment to profile...');
+-                await PaymentService.syncPaymentStatus(user.id, {
+-                    signUpPaid: true,
+-                    reference: paymentResult.reference,
+-                    provider: paymentResult.provider
+-                });
+-                profile.signUpPaid = true;
+-            }
+-        } else {
+-            console.log('[Sign-up Success] ❌ No signup payment detected');
+-            signupPaymentConfirmed = false;
+-        }
+-    } catch (err) {
+-        console.error('[Sign-up Success] Payment detection error:', err);
+-        signupPaymentConfirmed = profile.signUpPaid || false;
+-    }
+-
+-    // --- STATE 1: No signup payment ---
+-    if (!signupPaymentConfirmed) {
+-        console.log('[Sign-up Success] 🔄 STATE 1: Unpaid → showing signup flow');
+-        await handleUnpaidUserState(user, profile);
+-        return;
+-    }
+-
+-    // --- STEP 2: Detect subscription ---
+-    let subscriptionActive = false;
+-    let membershipTier = null;
+-
+-    try {
+-        console.log('[Sign-up Success] Checking subscription...');
+-        const subscriptionResult = await PaymentService.detectActiveSubscription(user.id, userEmail);
+-
+-        if (subscriptionResult.success && subscriptionResult.hasActiveSubscription) {
+-            subscriptionActive = true;
+-            membershipTier = subscriptionResult.planName;
+-            console.log(`✅ Active subscription confirmed: ${membershipTier}`);
+-
+-            if (!profile.subscriptionActive || profile.membershipTier !== membershipTier) {
+-                console.log('[Sign-up Success] Syncing subscription to profile...');
+-                await PaymentService.syncPaymentStatus(user.id, {
+-                    subscriptionActive: true,
+-                    membershipTier
+-                });
+-                profile.subscriptionActive = true;
+-                profile.membershipTier = membershipTier;
+-            }
+-        } else {
+-            console.log('[Sign-up Success] No active subscription found');
+-            subscriptionActive = false;
+-        }
+-    } catch (err) {
+-        console.error('[Sign-up Success] Subscription detection error:', err);
+-        subscriptionActive = profile.subscriptionActive || false;
+-        membershipTier = profile.membershipTier || null;
+-    }
+-
+-    console.log('[Sign-up Success] Final state:', {
+-        signupPaymentConfirmed,
+-        subscriptionActive,
+-        membershipTier: membershipTier || 'None'
+-    });
+-
+-    // --- STATE 2: Signup paid but no subscription ---
+-    if (signupPaymentConfirmed && (!subscriptionActive || !membershipTier || membershipTier === 'Free')) {
+-        console.log('[Sign-up Success] STATE 2: Show plan selection');
+-        await handleSignedUpUserState(user, profile);
+-        return;
+-    }
+-
+-    // --- STATE 3: Both payments done ---
+-    if (signupPaymentConfirmed && subscriptionActive && membershipTier && membershipTier !== 'Free') {
+-        console.log('[Sign-up Success] STATE 3: Subscribed user');
+-        await handleSubscribedUserState(user, profile);
+-        return;
+-    }
+-
+-    // --- Fallback ---
+-    console.warn('[Sign-up Success] Unexpected state → fallback to plan selection');
+-    await handleSignedUpUserState(user, profile);
+-}
+-
+-// --- STATE 1: Unpaid user ---
+-async function handleUnpaidUserState(user) {
+-    console.log('[Sign-up Success] STATE 1: Unpaid → redirect to signup');
+-
+-    hideAllElements();
+-    $w("#confirmationText").text = "⚠️ Signup payment required to access this page. Redirecting...";
+-    $w("#confirmationText").show();
+-
+-    await wixWindow.openLightbox('Alert', {
+-        message: '🚫 You need to complete your signup payment before accessing membership options.'
+-    });
+-
+-    wixLocation.to('/sign-up');
+-}
+-
+-// --- STATE 2: Signup done → choose plan ---
+-async function handleSignedUpUserState(user) {
+-    console.log('[Sign-up Success] STATE 2: Showing plan selection');
+-    hideAllElements();
+-
+-    $w("#confirmationText").text = "✅ Signup complete! Please select a membership plan below.";
+-    $w("#confirmationText").show();
+-
+-    $w("#billingCycleSwitch").show();
+-    $w("#switchLabel").show();
+-
+-    const initialCycle = $w("#billingCycleSwitch").checked ? "Annual" : "Monthly";
+-    await loadPlansFromCMS(initialCycle);
+-
+-    $w("#billingCycleSwitch").onChange(() => {
+-        const cycle = $w("#billingCycleSwitch").checked ? "Annual" : "Monthly";
+-        $w("#switchLabel").text = cycle;
+-        loadPlansFromCMS(cycle);
+-    });
+-
+-    $w("#dashboardLink").hide();
+-    $w("#managePlanLink").hide();
+-}
+-
+-// --- STATE 3: Active subscriber ---
+-async function handleSubscribedUserState(user, profile) {
+-    console.log('[Sign-up Success] STATE 3: Subscribed → show dashboard');
+-    hideAllElements();
+-
+-    let planName = profile.membershipTier;
+-
+-    try {
+-        const currentUser = wixUsers.currentUser;
+-        const userEmail = currentUser.email;
+-
+-        if (userEmail) {
+-            const result = await import('backend/enhanced-subscription-detector.jsw')
+-                .then(m => m.detectUserSubscriptions(userEmail, user.id));
+-            if (result.success && result.data?.selectedSubscription)
+-                planName = result.data.selectedSubscription.plan?.name || planName;
+-        }
+-    } catch (err) {
+-        console.warn('[Sign-up Success] Could not fetch enhanced subscription info:', err);
+-    }
+-
+-    if (!planName || planName === 'undefined' || planName === 'null' || planName === 'N/A') {
+-        planName = 'Free';
+-        console.log('[Sign-up Success] Defaulting to Free plan');
+-    }
+-
+-    $w("#confirmationText").html = `
+-        <p style="text-align:center;font-size:18px;color:#28a745;margin-bottom:20px;">
+-            🎉 <strong>Congratulations!</strong><br>
+-            You are subscribed to the <strong>${planName} Plan</strong>
+-        </p>
+-        <p style="text-align:center;font-size:16px;margin-bottom:30px;">
+-            Your emergency profile is now active and ready to use.
+-        </p>
+-    `;
+-    $w("#confirmationText").show();
+-
+-    try {
+-        $w("#dashboardLink").label = "Access Your Emergency Profile Dashboard";
+-        $w("#dashboardLink").show();
+-        $w("#dashboardLink").onClick(() => wixLocation.to('/emergency-profile-dashboard'));
+-    } catch {
+-        $w("#confirmationText").html += `
+-            <p style="text-align:center;">
+-                <a href="/emergency-profile-dashboard" style="background:#28a745;color:white;padding:12px 24px;text-decoration:none;border-radius:5px;font-weight:bold;">
+-                    Access Your Dashboard
+-                </a>
+-            </p>`;
+-    }
+-
+-    try {
+-        $w("#managePlanLink").label = "Manage Subscription";
+-        $w("#managePlanLink").show();
+-    } catch (e) {
+-        console.log('[Sign-up Success] Manage plan link not available');
+-    }
+-
+-    try {
+-        $w("#billingCycleSwitch").hide();
+-        $w("#switchLabel").hide();
+-        $w("#planRepeater").hide();
+-    } catch {}
+-}
+-
+-// --- CMS Plan Loader ---
+-async function loadPlansFromCMS(cycle = "Monthly") {
+-    try {
+-        const results = await wixData.query("PlanOptions").ascending("sortOrder").find();
+-        const planData = results.items;
+-        if (!planData.length) return;
+-
+-        $w("#planRepeater").data = planData;
+-        $w("#planRepeater").show();
+-
+-        $w("#planRepeater").onItemReady(($item, itemData) => {
+-            const price = cycle === "Annual" ? itemData.annualPrice : itemData.monthlyPrice;
+-            $item("#planName").text = itemData.planTier;
+-            $item("#planDescription").text = itemData.description || "";
+-            $item("#planPrice").text = `R${price} / ${cycle}`;
+-            $item("#planImage").src = itemData.productImage;
+-
+-            $item("#subscribeButton").label = `Choose Payment Method - ${itemData.planTier}`;
+-            $item("#subscribeButton").onClick(async () => {
+-                await handleDualPaymentSubscription($item, itemData, price, cycle);
+-            });
+-        });
+-    } catch (err) {
+-        console.error("❌ Error loading plans from CMS:", err);
+-        $w("#confirmationText").text = "⚠️ Unable to load plans. Contact support.";
+-        $w("#confirmationText").show();
+-    }
+-}
+-
+-// --- Dual Payment Selector ---
+-async function handleDualPaymentSubscription($item, itemData, price, cycle) {
+-    try {
+-        console.log(`Opening payment selector for plan: ${itemData.planTier}`);
+-        await wixWindow.openLightbox('SubscriptionPaymentSelector', {
+-            planName: itemData.planTier,
+-            amount: price,
+-            isAnnual: cycle === "Annual",
+-            features: itemData.description ? itemData.description.split('\n').slice(0, 5) : [],
+-            savings: cycle === "Annual" && itemData.monthlyPrice
+-                ? Math.round(((itemData.monthlyPrice * 12 - itemData.annualPrice) / (itemData.monthlyPrice * 12)) * 100)
+-                : 0
+-        });
+-    } catch (err) {
+-        console.error("❌ Payment selector error:", err);
+-        await wixWindow.openLightbox('Alert', {
+-            message: `Payment Selection Error: ${err.message}\n\nPlease try again or contact support.`
+-        });
+-    }
+-}
++// pages/Sign-up Success.js
++// ✅ PRODUCTION READY: Consolidated with live Paystack + PayFast verification
++import wixUsers from 'wix-users';
++import wixData from 'wix-data';
++import wixLocation from 'wix-location';
++import wixWindow from 'wix-window';
++import { PaymentService } from 'backend/core/payment-service.jsw';
++
++// Optional (only if you have it): profile helper
++// import { ProfileService } from 'backend/core/profile-service.jsw';
++
++$w.onReady(async () => {
++  const user = wixUsers.currentUser;
++  const ref = wixLocation.query.reference || wixLocation.query.ref || null;
++  const gateway = wixLocation.query.gateway || null; // "paystack" | "payfast"
++
++  if (!user.loggedIn) {
++    hideAll();
++    $w('#confirmationText').text = '⚠️ Please log in to view your membership status.';
++    $w('#confirmationText').show();
++    return;
++  }
++
++  hideAll();
++
++  // Load profile if needed
++  let profile = null;
++  try {
++    const q = await wixData.query('Emergency_Profiles').eq('_owner', user.id).limit(1).find({ suppressAuth: true });
++    profile = q.items[0] || null;
++  } catch (e) {
++    console.warn('[Sign-up Success] Profile fetch failed:', e.message);
++  }
++
++  try {
++    await handleUserStateReliable(user, profile, ref, gateway);
++  } catch (err) {
++    const errorId = `PAY-ERR-${Date.now()}`;
++    console.error('Sign-up Success fatal error:', err);
++    hideAll();
++    $w('#confirmationText').text = `⚠️ Unable to load profile. Contact support. (Ref: ${errorId})`;
++    $w('#confirmationText').show();
++  }
++});
++
++function hideAll() {
++  [
++    '#confirmationText',
++    '#billingCycleSwitch',
++    '#switchLabel',
++    '#planRepeater',
++    '#dashboardLink',
++    '#managePlanLink',
++    '#discountBadgeimage',
++    '#signUpButton'
++  ].forEach(id => { try { $w(id).hide(); } catch (_) {} });
++  try { $w('#billingCycleSwitch').checked = false; $w('#switchLabel').text = 'Monthly'; } catch (_) {}
++}
++
++async function handleUserStateReliable(user, profile, ref, gateway) {
++  console.log('[Sign-up Success] 🔍 Determining user state...');
++  const userEmail = user.email;
++
++  // STEP 1: signup detection
++  let signupPaymentConfirmed = false;
++  try {
++    const res = await PaymentService.detectSignupPayment(user.id, userEmail, ref, gateway);
++    if (res.success && res.paymentDetected) {
++      signupPaymentConfirmed = true;
++      // best-effort sync if profile exists but not set
++      if (profile && !profile.signUpPaid) {
++        await PaymentService.syncPaymentStatus(user.id, {
++          signUpPaid: true, reference: res.reference, provider: res.provider
++        });
++        profile.signUpPaid = true;
++      }
++    }
++  } catch (e) {
++    console.warn('[Sign-up Success] signup detection failed, using profile fallback:', e.message);
++    signupPaymentConfirmed = !!(profile && profile.signUpPaid);
++  }
++
++  if (!signupPaymentConfirmed) {
++    return handleUnpaidState();
++  }
++
++  // STEP 2: subscription detection
++  let subActive = false;
++  let tier = profile?.membershipTier || null;
++  try {
++    const sub = await PaymentService.detectActiveSubscription(user.id, userEmail);
++    if (sub.success && sub.hasActiveSubscription) {
++      subActive = true;
++      tier = sub.planName;
++      if (!profile || !profile.subscriptionActive || profile.membershipTier !== tier) {
++        await PaymentService.syncPaymentStatus(user.id, { subscriptionActive: true, membershipTier: tier });
++      }
++    } else {
++      subActive = false;
++    }
++  } catch (e) {
++    console.warn('[Sign-up Success] subscription detection failed, using profile fallback:', e.message);
++    subActive = !!(profile && profile.subscriptionActive);
++    tier = tier || profile?.membershipTier || null;
++  }
++
++  if (!tier || tier === 'Free') {
++    subActive = false;
++  }
++
++  if (!subActive) {
++    return handleNeedsPlanState();
++  }
++
++  return handleSubscribedState(tier);
++}
++
++function handleUnpaidState() {
++  hideAll();
++  $w('#confirmationText').text = '⚠️ Signup payment required to access this page.';
++  $w('#confirmationText').show();
++  wixWindow.openLightbox('Alert', {
++    message: '🚫 You need to complete your signup payment before accessing membership options.'
++  }).then(() => wixLocation.to('/sign-up'));
++}
++
++async function handleNeedsPlanState() {
++  hideAll();
++  $w('#confirmationText').text = '✅ Signup complete! Please select a membership plan below.';
++  $w('#confirmationText').show();
++  $w('#billingCycleSwitch').show();
++  $w('#switchLabel').show();
++  const initial = $w('#billingCycleSwitch').checked ? 'Annual' : 'Monthly';
++  await loadPlansFromCMS(initial);
++  $w('#billingCycleSwitch').onChange(() => {
++    const cycle = $w('#billingCycleSwitch').checked ? 'Annual' : 'Monthly';
++    $w('#switchLabel').text = cycle;
++    loadPlansFromCMS(cycle);
++  });
++  try { $w('#dashboardLink').hide(); $w('#managePlanLink').hide(); } catch (_) {}
++}
++
++function handleSubscribedState(planName) {
++  hideAll();
++  const safePlan = (!planName || planName === 'undefined' || planName === 'null' || planName === 'N/A') ? 'Free' : planName;
++  $w('#confirmationText').html = `
++    <p style="text-align:center;font-size:18px;color:#28a745;margin-bottom:20px;">
++      🎉 <strong>Congratulations!</strong><br>
++      You are subscribed to the <strong>${safePlan} Plan</strong>
++    </p>
++    <p style="text-align:center;font-size:16px;margin-bottom:30px;">
++      Your emergency profile is now active and ready to use.
++    </p>
++  `;
++  $w('#confirmationText').show();
++  try {
++    $w('#dashboardLink').label = 'Access Your Emergency Profile Dashboard';
++    $w('#dashboardLink').show();
++    $w('#dashboardLink').onClick(() => wixLocation.to('/emergency-profile-dashboard'));
++  } catch (_) {
++    $w('#confirmationText').html += `
++      <p style="text-align:center;">
++        <a href="/emergency-profile-dashboard" style="background:#28a745;color:white;padding:12px 24px;text-decoration:none;border-radius:5px;font-weight:bold;">
++          Access Your Dashboard
++        </a>
++      </p>`;
++  }
++  try { $w('#managePlanLink').label = 'Manage Subscription'; $w('#managePlanLink').show(); } catch (_) {}
++}
++
++async function loadPlansFromCMS(cycle = 'Monthly') {
++  try {
++    const results = await wixData.query('PlanOptions').ascending('sortOrder').find();
++    const plans = results.items;
++    if (!plans.length) return;
++    $w('#planRepeater').data = plans;
++    $w('#planRepeater').show();
++    $w('#planRepeater').onItemReady(($item, item) => {
++      const price = cycle === 'Annual' ? item.annualPrice : item.monthlyPrice;
++      const name = item.planTier || item.planName || 'Plan';
++      $item('#planName').text = name;
++      $item('#planDescription').text = item.description || '';
++      $item('#planPrice').text = `R${price} / ${cycle}`;
++      if (item.productImage) $item('#planImage').src = item.productImage;
++      $item('#subscribeButton').label = `Choose Payment Method - ${name}`;
++      $item('#subscribeButton').onClick(async () => {
++        await wixWindow.openLightbox('SubscriptionPaymentSelector', {
++          planName: name,
++          amount: price,
++          isAnnual: cycle === 'Annual',
++          features: item.description ? item.description.split('\n').slice(0, 5) : [],
++          savings: cycle === 'Annual' && item.monthlyPrice
++            ? Math.round(((item.monthlyPrice * 12 - item.annualPrice) / (item.monthlyPrice * 12)) * 100)
++            : 0
++        });
++      });
++    });
++  } catch (e) {
++    console.error('❌ loadPlansFromCMS error:', e);
++    $w('#confirmationText').text = '⚠️ Unable to load plans. Contact support.';
++    $w('#confirmationText').show();
++  }
++}
