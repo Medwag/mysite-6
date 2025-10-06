@@ -43,14 +43,34 @@ $w.onReady(async () => {
     sendDiscordLog(`✅ PayFast payment function loaded successfully`);
   }
   
-  // Initialize page elements with error handling
-  try { $w("#formContainer").collapse(); } catch (e) { console.log("formContainer not found"); }
-  try { $w("#goToDashboardButton").hide(); } catch (e) { console.log("goToDashboardButton not found"); }
-  try { $w("#goToSubscriptionButton").hide(); } catch (e) { console.log("goToSubscriptionButton not found"); }
-  try { $w("#openSignUp").hide(); } catch (e) { console.log("openSignUp not found"); }
-  try { $w("#paystackPayButton").hide(); } catch (e) { console.log("paystackPayButton not found"); }
-  try { $w("#payfastPayButton").hide(); } catch (e) { console.log("payfastPayButton not found"); }
-  try { $w("#statusText").text = "Checking your sign-up status..."; } catch (e) { console.log("statusText not found"); }
+  // Helper function to safely manipulate elements
+  function safeElementAction(elementId, action, description) {
+    try {
+      const elements = $w(elementId);
+      if (elements && elements.length > 0) {
+        const element = elements[0];
+        if (element) {
+          action(element);
+          console.log(`✅ ${description} action completed`);
+          return true;
+        }
+      }
+      console.log(`⚠️ ${description} element not found`);
+      return false;
+    } catch (e) {
+      console.error(`❌ ${description} action failed:`, e);
+      return false;
+    }
+  }
+
+  // Initialize page elements with robust error handling
+  safeElementAction("#formContainer", (el) => el.collapse(), "formContainer collapse");
+  safeElementAction("#goToDashboardButton", (el) => el.hide(), "goToDashboardButton hide");
+  safeElementAction("#goToSubscriptionButton", (el) => el.hide(), "goToSubscriptionButton hide");
+  safeElementAction("#openSignUp", (el) => el.hide(), "openSignUp hide");
+  safeElementAction("#paystackPayButton", (el) => el.hide(), "paystackPayButton hide");
+  safeElementAction("#payfastPayButton", (el) => el.hide(), "payfastPayButton hide");
+  safeElementAction("#statusText", (el) => el.text = "Checking your sign-up status...", "statusText update");
 
   const user = wixUsers.currentUser;
   if (!user.loggedIn) {
@@ -77,85 +97,93 @@ $w.onReady(async () => {
     // ✅ SCENARIO 1: Sign up paid AND membership tier selected and confirmed as paid
     // SHOW: goToDashboardButton ONLY
     sendDiscordLog(`✅ SCENARIO 1: User ${userId} (${email}) fully onboarded - showing dashboard button`);
-    try { $w("#goToDashboardButton").show(); } catch (e) { console.log("Cannot show goToDashboardButton"); }
+    safeElementAction("#goToDashboardButton", (el) => el.show(), "goToDashboardButton show");
     // Payment buttons hidden (sign-up already paid)
-    try { $w("#statusText").text = `✅ Welcome back! Sign-up confirmed via ${status.signupSource}. Active ${status.membershipTier} membership.`; } catch (e) { console.log("Cannot update statusText"); }
+    safeElementAction("#statusText", (el) => el.text = `✅ Welcome back! Sign-up confirmed via ${status.signupSource}. Active ${status.membershipTier} membership.`, "statusText update");
   } 
   else if (status.hasSignUpPaid && !status.hasSubscription) {
     // ⚠️ SCENARIO 2: Sign up paid and confirmed BUT membership tier NOT selected/paid/confirmed
     // SHOW: goToSubscriptionButton ONLY
     sendDiscordLog(`⚠️ SCENARIO 2: User ${userId} (${email}) signup paid but needs subscription - showing subscription button`);
-    try { $w("#goToSubscriptionButton").show(); } catch (e) { console.log("Cannot show goToSubscriptionButton"); }
+    safeElementAction("#goToSubscriptionButton", (el) => el.show(), "goToSubscriptionButton show");
     // Payment buttons hidden (sign-up already paid)
     if (status.hasMembershipTierSelected) {
-      try { $w("#statusText").text = `✅ Sign-up confirmed (${status.signupSource}), but ${status.membershipTier} membership needs payment confirmation.`; } catch (e) { console.log("Cannot update statusText"); }
+      safeElementAction("#statusText", (el) => el.text = `✅ Sign-up confirmed (${status.signupSource}), but ${status.membershipTier} membership needs payment confirmation.`, "statusText update");
     } else {
-      try { $w("#statusText").text = `✅ Sign-up confirmed (${status.signupSource}), but no membership tier selected yet.`; } catch (e) { console.log("Cannot update statusText"); }
+      safeElementAction("#statusText", (el) => el.text = `✅ Sign-up confirmed (${status.signupSource}), but no membership tier selected yet.`, "statusText update");
     }
   } 
   else {
     // 📝 SCENARIO 3: Sign up fee NOT paid or cannot be confirmed
     // SHOW: openSignUp AND payment gateway buttons
     sendDiscordLog(`📝 SCENARIO 3: User ${userId} (${email}) needs signup payment - showing payment buttons (PayFast + Paystack)`);
-    try { $w("#openSignUp").show(); } catch (e) { console.log("Cannot show openSignUp"); }
-    try { $w("#paystackPayButton").show(); } catch (e) { console.log("Cannot show paystackPayButton"); }
-    try { 
-      $w("#payfastPayButton").show(); 
+    safeElementAction("#openSignUp", (el) => el.show(), "openSignUp show");
+    safeElementAction("#paystackPayButton", (el) => el.show(), "paystackPayButton show");
+    
+    // PayFast button with enhanced logging
+    const payfastShown = safeElementAction("#payfastPayButton", (el) => el.show(), "payfastPayButton show");
+    if (payfastShown) {
       console.log("✅ PayFast button shown successfully");
       sendDiscordLog(`✅ PayFast button displayed for user ${userId} (${email}) - signup payment needed`);
-    } catch (e) { 
-      console.error("❌ Cannot show payfastPayButton:", e); 
-      sendDiscordLog(`❌ Failed to show PayFast button for user ${userId} (${email}): ${e.message}`);
+    } else {
+      console.error("❌ Cannot show payfastPayButton");
+      sendDiscordLog(`❌ Failed to show PayFast button for user ${userId} (${email}) - element not found`);
     }
-    try { $w("#statusText").text = "📝 Please complete your sign-up payment below using Paystack or PayFast."; } catch (e) { console.log("Cannot update statusText"); }
+    
+    safeElementAction("#statusText", (el) => el.text = "📝 Please complete your sign-up payment below using Paystack or PayFast.", "statusText update");
   }
 
-  // --- Button Listeners (with error handling) ---
-  try {
-    $w("#openSignUp").onClick(() => toggleForm());
-  } catch (e) {
-    console.log("openSignUp button not found or not available");
-  }
+  // --- Button Listeners (with robust element validation) ---
   
-  try {
-    $w("#submitFormButton").onClick(() => handleFormSubmit(userId, email));
-  } catch (e) {
-    console.log("submitFormButton not found or not available");
+  // Helper function to safely attach event listeners
+  function safeAttachClick(elementId, handler, description) {
+    try {
+      // First check if element exists in the $w collection
+      const elements = $w(elementId);
+      if (elements && elements.length > 0) {
+        const element = elements[0];
+        if (element && typeof element.onClick === 'function') {
+          element.onClick(handler);
+          console.log(`✅ ${description} onClick handler attached successfully`);
+          return true;
+        } else {
+          console.log(`⚠️ ${description} exists but onClick method not available`);
+          sendDiscordLog(`⚠️ ${description} exists but onClick method not available for user ${userId}`);
+        }
+      } else {
+        console.log(`⚠️ ${description} element not found in DOM`);
+        sendDiscordLog(`⚠️ ${description} element not found in DOM for user ${userId}`);
+      }
+    } catch (e) {
+      console.error(`❌ ${description} attachment failed:`, e);
+      sendDiscordLog(`❌ ${description} attachment failed for user ${userId}: ${e.message}`);
+    }
+    return false;
   }
+
+  // Attach event listeners with validation
+  safeAttachClick("#openSignUp", () => toggleForm(), "openSignUp button");
   
-  try {
-    $w("#paystackPayButton").onClick(() => handlePaystackSignup(userId, email));
-  } catch (e) {
-    console.log("paystackPayButton not found or not available");
-  }
+  safeAttachClick("#submitFormButton", () => handleFormSubmit(userId, email), "submitFormButton");
   
-  try {
-    const payfastButton = $w("#payfastPayButton");
-    console.log("🔍 PayFast button element:", payfastButton);
-    
-    payfastButton.onClick(() => {
-      console.log("🔥 PayFast button clicked! Initiating payment...");
-      sendDiscordLog(`🔥 PayFast button clicked by user ${userId} (${email})`);
-      handlePayfastSignup(userId, email);
-    });
-    console.log("✅ PayFast button onClick handler attached successfully");
+  safeAttachClick("#paystackPayButton", () => handlePaystackSignup(userId, email), "paystackPayButton");
+  
+  // PayFast button with enhanced logging
+  const payfastAttached = safeAttachClick("#payfastPayButton", () => {
+    console.log("🔥 PayFast button clicked! Initiating payment...");
+    sendDiscordLog(`🔥 PayFast button clicked by user ${userId} (${email})`);
+    handlePayfastSignup(userId, email);
+  }, "payfastPayButton");
+  
+  if (payfastAttached) {
     sendDiscordLog(`✅ PayFast button initialized successfully for user ${userId} (${email})`);
-  } catch (e) {
-    console.error("❌ payfastPayButton not found or not available:", e);
-    sendDiscordLog(`❌ PayFast button initialization failed for user ${userId} (${email}): ${e.message}`);
+  } else {
+    sendDiscordLog(`❌ PayFast button initialization failed for user ${userId} (${email})`);
   }
   
-  try {
-    $w("#goToDashboardButton").onClick(() => wixLocation.to("/dashboard"));
-  } catch (e) {
-    console.log("goToDashboardButton not found or not available");
-  }
+  safeAttachClick("#goToDashboardButton", () => wixLocation.to("/dashboard"), "goToDashboardButton");
   
-  try {
-    $w("#goToSubscriptionButton").onClick(() => wixLocation.to("/signup-success"));
-  } catch (e) {
-    console.log("goToSubscriptionButton not found or not available");
-  }
+  safeAttachClick("#goToSubscriptionButton", () => wixLocation.to("/signup-success"), "goToSubscriptionButton");
 });
 
 /* === Helper: Animate Form Container === */
@@ -189,12 +217,12 @@ async function handlePayfastSignup(userId, email) {
   
   try {
     console.log("📱 Updating status text...");
-    try { 
-      $w("#statusText").text = "🔗 Redirecting to PayFast...";
+    const statusUpdated = safeElementAction("#statusText", (el) => el.text = "🔗 Redirecting to PayFast...", "PayFast status text update");
+    if (statusUpdated) {
       console.log("✅ Status text updated successfully");
-    } catch (statusErr) {
-      console.error("❌ Failed to update status text:", statusErr);
-      sendDiscordLog(`⚠️ PayFast: Failed to update status text for user ${userId}: ${statusErr.message}`);
+    } else {
+      console.error("❌ Failed to update status text");
+      sendDiscordLog(`⚠️ PayFast: Failed to update status text for user ${userId} - element not found`);
     }
     
     console.log("🔗 Calling createPayfastPayment...");
@@ -222,11 +250,10 @@ async function handlePayfastSignup(userId, email) {
     sendDiscordLog(`❌ PayFast Error Details: ${err.message}`);
     sendDiscordLog(`❌ PayFast Stack Trace: ${err.stack || 'No stack trace available'}`);
     
-    try {
-      $w("#statusText").text = "❌ Failed to initiate PayFast payment.";
-    } catch (statusErr) {
-      console.error("❌ Also failed to update error status:", statusErr);
-      sendDiscordLog(`❌ PayFast: Also failed to update error status for user ${userId}: ${statusErr.message}`);
+    const errorStatusUpdated = safeElementAction("#statusText", (el) => el.text = "❌ Failed to initiate PayFast payment.", "PayFast error status update");
+    if (!errorStatusUpdated) {
+      console.error("❌ Also failed to update error status");
+      sendDiscordLog(`❌ PayFast: Also failed to update error status for user ${userId} - element not found`);
     }
     
     try {
