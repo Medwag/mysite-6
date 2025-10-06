@@ -85,11 +85,17 @@ $w.onReady(async () => {
   
   buttonsToTest.forEach(buttonId => {
     try {
-      // Test multiple selector variations
+      // Test multiple selector variations including common naming patterns
       const variations = [
         `#${buttonId}`,
         buttonId,
-        `[id="${buttonId}"]`
+        `[id="${buttonId}"]`,
+        `#${buttonId.toLowerCase()}`,
+        `#${buttonId.toUpperCase()}`,
+        `#button${buttonId.charAt(0).toUpperCase()}${buttonId.slice(1)}`,
+        `#btn${buttonId.charAt(0).toUpperCase()}${buttonId.slice(1)}`,
+        `[id*="${buttonId}"]`,
+        `[id*="${buttonId.toLowerCase()}"]`
       ];
       
       variations.forEach(selector => {
@@ -349,14 +355,37 @@ $w.onReady(async () => {
       const allElements = $w('*');
       sendDiscordLog(`📊 Total elements found on page: ${allElements.length}`);
       
-      // Try to find elements by checking if they have IDs that match what we need
+      // Log ALL element IDs to see what's actually on the page
+      const elementsWithIds = allElements.filter(el => {
+        try {
+          return el.id && el.id.length > 0;
+        } catch (e) {
+          return false;
+        }
+      });
+      
+      sendDiscordLog(`🔍 ALL ELEMENT IDs ON PAGE (${elementsWithIds.length} elements):`);
+      elementsWithIds.forEach((el, index) => {
+        try {
+          const elementInfo = `${index + 1}. ID: "${el.id}" | Type: ${el.type || 'unknown'}`;
+          sendDiscordLog(elementInfo);
+        } catch (e) {
+          sendDiscordLog(`${index + 1}. ID: [error reading] | Error: ${e.message}`);
+        }
+      });
+      
+      // Also try to find elements by checking if they have IDs that match what we need
       const buttonElements = allElements.filter(el => {
         try {
           return el.id && (
             el.id.includes('Button') || 
             el.id.includes('SignUp') || 
             el.id.includes('Container') || 
-            el.id.includes('Text')
+            el.id.includes('Text') ||
+            el.id.includes('payfast') ||
+            el.id.includes('paystack') ||
+            el.id.includes('Dashboard') ||
+            el.id.includes('Subscription')
           );
         } catch (e) {
           return false;
@@ -366,7 +395,7 @@ $w.onReady(async () => {
       sendDiscordLog(`🎯 Elements with relevant IDs: ${buttonElements.length}`);
       buttonElements.forEach(el => {
         try {
-          sendDiscordLog(`🔍 Found element with ID: ${el.id} (type: ${el.type || 'unknown'})`);
+          sendDiscordLog(`🔍 Found relevant element: ID="${el.id}" | Type=${el.type || 'unknown'}`);
         } catch (e) {
           sendDiscordLog(`🔍 Found element but cannot read properties: ${e.message}`);
         }
