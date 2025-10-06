@@ -1,335 +1,76 @@
-// ✅ backend/payfastUrl.jsw
-// Enhanced PayFast URL Generation for EmergiTag
-import { getPayFastConfig, getPayFastPaymentUrl } from 'backend/payfast-config.jsw';
-import { generatePayFastSignature, createPayFastSignupParams } from 'backend/payfastUtils.jsw';
+// backend/payfastUrl.jsw
 import wixUsersBackend from 'wix-users-backend';
+import { getPayFastConfig, getPayFastPaymentUrl } from 'backend/payfast-config.jsw';
+import { generatePayFastSignature, createPayFastSignupParams, customEncode } from 'backend/payfastUtils.jsw';
 
-/**
- * Enhanced PayFast URL generation for signup payments
- * @param {string} userId - The ID of the user initiating the payment
- * @param {number} amount - Payment amount (default 149.00 ZAR)
- * @returns {Promise<string>} The complete PayFast payment gateway URL
- * @throws {Error} If PayFast credentials are not configured or other errors occur
- */
 export async function generatePayFastUrl(userId, amount = 149.00) {
-    try {
-        console.log(`🚀 [PayFast URL] Starting PayFast URL generation for userId: ${userId}, amount: R${amount}`);
+  const config = await getPayFastConfig();
+  const { passphrase } = config.getCredentials();
 
-        // Initialize PayFast configuration
-        const config = await getPayFastConfig();
-        const configSummary = config.getConfigSummary();
-        console.log(`[PayFast URL] Using configuration:`, configSummary);
+  // Resolve email
+  let email = `user_${userId}@emergitag.me`;
+  try {
+    const u = await wixUsersBackend.getUser(userId);
+    email = u?.loginEmail || email;
+  } catch (_) {}
 
-        // Fetch user email securely
-        let userEmail = '';
-        try {
-            const user = await wixUsersBackend.getUser(userId);
-            userEmail = user?.loginEmail || `user_${userId}@emergitag.me`;
-            console.log(`📧 [PayFast URL] User email resolved: ${userEmail}`);
-        } catch (error) {
-            console.warn(`⚠️ [PayFast URL] Could not fetch user email for ${userId}, using fallback:`, error);
-            userEmail = `user_${userId}@emergitag.me`;
-        }
+  const params = await createPayFastSignupParams(userId, email, amount);
+  params.signature = await generatePayFastSignature(params, passphrase);
 
-        // Create PayFast payment parameters
-        const paymentParams = await createPayFastSignupParams(userId, userEmail, amount);
-        console.log(`📋 [PayFast URL] Payment parameters created:`, {
-            amount: paymentParams.amount,
-            reference: paymentParams.m_payment_id,
-            email: paymentParams.email_address
-        });
-
-        // Generate signature
-        const { passphrase } = config.getCredentials();
-        const signature = await generatePayFastSignature(paymentParams, passphrase);
-        console.log(`🔐 [PayFast URL] Signature generated successfully`);
-
-        // Add signature to parameters
-        paymentParams.signature = signature;
-
-        // Build PayFast URL using PayFast encoding (same as signature)
-        const baseUrl = getPayFastPaymentUrl();
-        
-        // Use PayFast encoding for consistency
-        const { customEncode } = await import('./payfastUtils.jsw');
-        const queryString = Object.keys(paymentParams).sort()
-            .map(key => `${key}=${customEncode(paymentParams[key])}`)
-            .join('&');
-
-        const fullUrl = `${baseUrl}?${queryString}`;
-        
-        console.log(`✅ [PayFast URL] PayFast URL generated successfully`);
-        console.log(`[PayFast URL] Environment: ${config.getEnvironment()}`);
-        console.log(`[PayFast URL] URL length: ${fullUrl.length} characters`);
-        
-        // Log URL for debugging (without sensitive data)
-        const debugUrl = fullUrl.replace(/merchant_key=[^&]+/, 'merchant_key=***')
-                                .replace(/signature=[^&]+/, 'signature=***');
-        console.log(`[PayFast URL] Debug URL: ${debugUrl}`);
-
-        return fullUrl;
-
-    } catch (err) {
-        console.error(`❌ [PayFast URL] Failed to generate PayFast URL:`, err);
-        throw new Error(`PayFast URL generation failed: ${err.message}`);
-    }
+  const baseUrl = await getPayFastPaymentUrl();
+  const query = Object.keys(params).sort().map(k => `${k}=${customEncode(params[k])}`).join('&');
+  return `${baseUrl}?${query}`;
 }
 
 /**
- * Generate PayFast URL for subscription payments
- * @param {string} userId - User ID
- * @param {string} planName - Subscription plan name
- * @param {number} amount - Monthly amount
- * @param {string} billingCycle - Billing cycle (monthly, annual)
- * @returns {Promise<string>} PayFast subscription URL
+ * Generate PayFast URL for a recurring subscription payment.
+ * @param {string} userId
+ * @param {string} planName
+ * @param {number} amount
+ * @param {'monthly'|'annual'} billingCycle
  */
 export async function generatePayFastSubscriptionUrl(userId, planName, amount, billingCycle = 'monthly') {
-    try {
-        console.log(`🚀 [PayFast Subscription] Generating subscription URL for ${userId}, plan: ${planName}`);
+  const config = await getPayFastConfig();
+  const { merchantId, merchantKey, passphrase } = config.getCredentials();
 
-        const config = await getPayFastConfig();
-        const { merchantId, merchantKey, passphrase } = config.getCredentials();
+  // Resolve email
+  let email = `user_${userId}@emergitag.me`;
+  try {
+    const u = await wixUsersBackend.getUser(userId);
+    email = u?.loginEmail || email;
+  } catch (_) {}
 
-        // Fetch user email
-        let userEmail = '';
-        try {
-            const user = await wixUsersBackend.getUser(userId);
-            userEmail = user?.loginEmail || `user_${userId}@emergitag.me`;
-        } catch (error) {
-            console.warn(`⚠️ Could not fetch user email for ${userId}:`, error);
-            userEmail = `user_${userId}@emergitag.me`;
-        }
+  const frequency = billingCycle === 'annual' ? '6' : '3'; // PayFast: 3=Monthly, 6=Annual
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
 
-        // Create subscription parameters
-        const timestamp = Date.now();
-        const subscriptionParams = {
-            // Merchant details
-            merchant_id: merchantId,
-            merchant_key: merchantKey,
-            
-            // Subscription details
-            amount: amount.toFixed(2),
-            item_name: `EmergiTag ${planName} Plan`,
-            item_description: `Monthly ${planName} subscription for EmergiTag emergency profile service`,
-            
-            // Recurring details
-            subscription_type: '1', // Subscription
-            billing_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Tomorrow
-            recurring_amount: amount.toFixed(2),
-            frequency: billingCycle === 'annual' ? '6' : '3', // 3=Monthly, 6=Annual
-            cycles: '0', // Indefinite
-            
-            // Customer details
-            email_address: userEmail,
-            email_confirmation: 1,
-            confirmation_address: userEmail,
-            
-            // URLs
-            return_url: "https://www.emergitag.me/subscription-success",
-            cancel_url: "https://www.emergitag.me/subscription-cancelled", 
-            notify_url: "https://www.emergitag.me/_functions/payfast-itn",
-            
-            // Custom fields
-            m_payment_id: `EMERGI_PF_SUB_${planName.toUpperCase()}_${userId}_${timestamp}`,
-            custom_str1: userId,
-            custom_str2: planName,
-            custom_str3: billingCycle,
-            custom_str4: "subscription",
-            custom_str5: new Date().toISOString()
-        };
+  const params = {
+    merchant_id: merchantId,
+    merchant_key: merchantKey,
+    amount: Number(amount).toFixed(2),
+    item_name: `EmergiTag ${planName} Plan`,
+    item_description: `Recurring ${planName} subscription for EmergiTag`,
+    subscription_type: '1',
+    billing_date: tomorrow,
+    recurring_amount: Number(amount).toFixed(2),
+    frequency,
+    cycles: '0',
+    email_address: email,
+    email_confirmation: 1,
+    confirmation_address: email,
+    return_url: 'https://www.emergitag.me/subscription-success',
+    cancel_url: 'https://www.emergitag.me/subscription-cancelled',
+    notify_url: 'https://www.emergitag.me/_functions/payfast-itn',
+    m_payment_id: `EMERGI_PF_SUB_${planName.toUpperCase()}_${userId}_${Date.now()}`,
+    custom_str1: userId,
+    custom_str2: planName,
+    custom_str3: billingCycle,
+    custom_str4: 'subscription',
+    custom_str5: new Date().toISOString(),
+  };
 
-        // Generate signature
-        const signature = await generatePayFastSignature(subscriptionParams, passphrase);
-        subscriptionParams.signature = signature;
+  params.signature = await generatePayFastSignature(params, passphrase);
 
-        // Build URL using PayFast encoding (same as signature)
-        const baseUrl = await getPayFastPaymentUrl();
-        
-        // Use PayFast encoding for consistency
-        const { customEncode } = await import('./payfastUtils.jsw');
-        const queryString = Object.keys(subscriptionParams).sort()
-            .map(key => `${key}=${customEncode(subscriptionParams[key])}`)
-            .join('&');
-
-        const fullUrl = `${baseUrl}?${queryString}`;
-        
-        console.log(`✅ [PayFast Subscription] Subscription URL generated successfully for ${planName}`);
-        return fullUrl;
-
-    } catch (err) {
-        console.error(`❌ [PayFast Subscription] Failed to generate subscription URL:`, err);
-        throw new Error(`PayFast subscription URL generation failed: ${err.message}`);
-    }
-}
-
-/**
- * Validate PayFast configuration for debugging
- * @returns {Promise<object>} Configuration validation result
- */
-export async function validatePayFastConfiguration() {
-    try {
-        console.log('[PayFast Validation] Validating PayFast configuration...');
-        
-        const config = await getPayFastConfig();
-        const summary = config.getConfigSummary();
-        const credentials = config.getCredentials();
-        
-        const validation = {
-            isValid: true,
-            environment: summary.environment,
-            issues: [],
-            summary
-        };
-
-        // Validate merchant ID
-        if (!credentials.merchantId || credentials.merchantId <= 0) {
-            validation.isValid = false;
-            validation.issues.push('Invalid merchant ID');
-        }
-
-        // Validate merchant key
-        if (!credentials.merchantKey || credentials.merchantKey.length < 10) {
-            validation.isValid = false;
-            validation.issues.push('Invalid merchant key (too short)');
-        }
-
-        // Check environment
-        if (config.isSandbox()) {
-            validation.issues.push('Running in SANDBOX mode');
-        }
-
-        console.log('[PayFast Validation] Validation result:', validation);
-        return validation;
-
-    } catch (err) {
-        console.error('[PayFast Validation] Configuration validation failed:', err);
-        return {
-            isValid: false,
-            issues: [`Configuration error: ${err.message}`],
-            summary: null
-        };
-    }
-}
-
-/**
- * Generates the PayFast URL for a recurring subscription payment,
- * accepting dynamic plan details from the frontend.
- * @param {string} userId - The ID of the user initiating the subscription.
- * @param {'monthly' | 'annual'} subscriptionType - The type of subscription ('monthly' or 'annual').
- * @param {string} planName - The name of the plan (e.g., "Basic Plan").
- * @param {string} amount - The initial and recurring amount for the subscription (e.g., "29.00").
- * @returns {Promise<string>} The complete PayFast subscription gateway URL.
- * @throws {Error} If PayFast credentials are not configured, invalid subscription type, or other errors.
- */
-export async function generatePayFastSubscriptionUrl(userId, subscriptionType, planName, amount) {
-    try {
-        console.log(`🚀 Starting PayFast Subscription URL generation for userId: ${userId}, type: ${subscriptionType}, plan: ${planName}, amount: ${amount}`);
-
-        // Retrieve PayFast credentials from centralized config
-        const config = await getPayFastConfig();
-        const { merchantId, merchantKey, passphrase } = config.getCredentials();
-
-        if (!merchantId || !merchantKey) {
-            throw new Error('PayFast merchant credentials not configured or invalid in configuration.');
-        }
-
-        // Validate merchant_key length as per PayFast requirements
-        if (merchantKey.length !== 13) {
-            console.error("❌ PayFast merchant key is not 13 characters. Please correct it in configuration.");
-            throw new Error('PayFast merchant key must be 13 characters.');
-        }
-
-        // Fetch user email
-        let userEmail = '';
-        try {
-            const user = await wixUsersBackend.getUser(userId);
-            userEmail = user?.loginEmail || `user_${userId}@emergitag.me`;
-        } catch (error) {
-            console.warn(`⚠️ Could not fetch user email for ${userId} using wixUsersBackend, using fallback:`, error);
-            userEmail = `user_${userId}@emergitag.me`;
-        }
-        console.log("📧 User Email for PayFast:", userEmail);
-
-        // Determine frequency and cycles based on subscriptionType
-        let frequency;
-        let cycles = 0; // 0 for infinite cycles
-        let itemDescriptionSuffix;
-
-        switch (subscriptionType) {
-            case 'monthly':
-                frequency = 3; // PayFast frequency code: 3 = Monthly
-                itemDescriptionSuffix = "Monthly Subscription - Recurring payment";
-                break;
-            case 'annual':
-                frequency = 6; // PayFast frequency code: 6 = Annually
-                itemDescriptionSuffix = "Annual Subscription - Recurring payment";
-                break;
-            default:
-                throw new Error(`Invalid subscription type provided: ${subscriptionType}. Must be 'monthly' or 'annual'.`);
-        }
-
-        // Calculate billing date for the *next* payment.
-        // ⚠️ REVIEW: PayFast's 'billing_date' often refers to the *start* of the recurring cycle (i.e., current date).
-        // If your intention is for the first recurring payment to be one month/year from now, this is correct.
-        // Otherwise, set it to new Date().
-        const billingDate = new Date();
-        if (subscriptionType === 'monthly') {
-            billingDate.setMonth(billingDate.getMonth() + 1);
-        } else { // 'annual'
-            billingDate.setFullYear(billingDate.getFullYear() + 1);
-        }
-        const formattedBillingDate = billingDate.toISOString().split('T')[0];
-
-        // Define the parameters for the subscription payment.
-        const subscriptionParams = {
-            merchant_id: merchantId,
-            merchant_key: merchantKey, // ✅ Re-included for URL construction as per PayFast's requirement
-            amount: parseFloat(amount).toFixed(2), // Initial amount from frontend, formatted
-            item_name: `EmergiTag ${planName}`, // Plan name from frontend
-            item_description: `EmergiTag ${planName} ${itemDescriptionSuffix}`,
-            email_address: userEmail,
-            // Corrected email_confirmation to use 1 (for true) as per PayFast documentation
-            email_confirmation: 1,
-            confirmation_address: userEmail, // Required if email_confirmation is '1'
-            m_payment_id: `sub_${subscriptionType}_${userId}_${Date.now()}`, // Unique payment ID
-            return_url: "https://www.emergitag.me/join?status=success", // Redirect after success
-            cancel_url: "https://www.emergitag.me/join?status=cancelled", // Redirect after cancel
-            notify_url: "https://www.emergitag.me/_functions/notify", // IPN URL for status updates
-            custom_str1: userId, // Custom field to pass userId
-            custom_str2: planName, // Custom field to identify subscription type
-            custom_str3: subscriptionType,
-            subscription_type: 1, // Indicates a recurring subscription (mandatory for subscriptions)
-            billing_date: formattedBillingDate, // Date of the first recurring payment
-            recurring_amount: parseFloat(amount).toFixed(2), // Recurring amount (same as initial amount for now), formatted
-            frequency: frequency, // Frequency of recurring payments
-            cycles: cycles // Number of cycles (0 for infinite)
-        };
-
-        // Generate the signature. Await the async function.
-        const signature = await generatePayFastSignature(subscriptionParams, passphrase);
-
-        console.log("🔍 Type of signature before URL append:", typeof signature);
-
-        // --- MANUAL URL PARAMETER CONSTRUCTION ---
-        const paramsArray = [];
-        Object.entries(subscriptionParams).forEach(([key, value]) => {
-            // ✅ CORRECTION: merchant_key is now included here.
-            paramsArray.push(`${key}=${encodeURIComponent(String(value)).replace(/%20/g, '+')}`);
-        });
-        paramsArray.push(`signature=${encodeURIComponent(signature).replace(/%20/g, '+')}`);
-
-        const queryString = paramsArray.join("&");
-        const finalUrl = `https://payfast.co.za/eng/process?${queryString}`;
-        // --- END MANUAL URL PARAMETER CONSTRUCTION ---
-
-        console.log("✅ Generated PayFast Subscription URL successfully.");
-        console.log("🔗 Final PayFast Subscription URL (truncated for log):", finalUrl.substring(0, 200) + "...");
-        console.log("🔗 Full URL Parameters String:", queryString);
-
-        return finalUrl;
-
-    } catch (error) {
-        console.error("❌ PayFast subscription URL generation failed:", error);
-        throw new Error(`PayFast subscription error: ${error.message}`);
-    }
+  const baseUrl = await getPayFastPaymentUrl();
+  const query = Object.keys(params).sort().map(k => `${k}=${customEncode(params[k])}`).join('&');
+  return `${baseUrl}?${query}`;
 }

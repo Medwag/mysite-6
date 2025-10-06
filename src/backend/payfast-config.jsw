@@ -1,230 +1,74 @@
-// backend/payfast-config.jsw
-// PayFast Configuration Management for EmergiTag
-//
-// REQUIRED WIX SECRETS:
-// - payfast_merchant_id    (PayFast Merchant ID - integer)
-// - payfast_merchant_key   (PayFast Merchant Key - string) 
-// - payfast_passphrase     (PayFast Passphrase - string)
-//
+// backend/payfast-config.jsw  (replace the whole file with this cleaned version)
 import { getSecret } from 'wix-secrets-backend';
 
-/**
- * PayFast Configuration Object
- * Manages both Sandbox and Live environments
- */
 class PayFastConfig {
-    constructor() {
-        this.isInitialized = false;
-        this.config = {
-            merchantId: null,
-            merchantKey: null,
-            passphrase: null,
-            environment: 'sandbox', // 'sandbox' or 'live'
-            urls: {
-                sandbox: 'https://sandbox.payfast.co.za/eng/process',
-                live: 'https://www.payfast.co.za/eng/process'
-            }
-        };
-    }
+  constructor() {
+    this.isInitialized = false;
+    this.config = {
+      merchantId: null,
+      merchantKey: null,
+      passphrase: null,
+      environment: 'sandbox',
+      urls: {
+        sandbox: 'https://sandbox.payfast.co.za/eng/process',
+        live: 'https://www.payfast.co.za/eng/process'
+      }
+    };
+  }
 
-    /**
-     * Initialize PayFast configuration from Wix Secrets
-     * @returns {Promise<void>}
-     */
-    async initialize() {
-        try {
-            console.log('[PayFast Config] Initializing PayFast configuration...');
-            
-            // Get environment setting (defaults to sandbox for safety)
-            let environment = 'sandbox';
-            try {
-                environment = await getSecret("payfastEnvironment") || 'sandbox';
-            } catch (err) {
-                console.warn('[PayFast Config] Environment not set, using sandbox');
-            }
-            
-            this.config.environment = environment;
-            
-            // Force direct secret loading with the correct names
-            console.log(`[PayFast Config] 🔑 Loading secrets: payfast_merchant_id, payfast_merchant_key, payfast_passphrase`);
-            
-            let merchantId, merchantKey, passphrase;
-            
-            try {
-                console.log(`[PayFast Config] 1/3 Loading payfast_merchant_id...`);
-                merchantId = await getSecret("payfast_merchant_id");
-                console.log(`[PayFast Config] ✅ payfast_merchant_id loaded: ${merchantId}`);
-            } catch (err) {
-                console.error(`[PayFast Config] ❌ Failed to load payfast_merchant_id:`, err.message);
-                throw new Error(`Secret 'payfast_merchant_id' not found: ${err.message}`);
-            }
-            
-            try {
-                console.log(`[PayFast Config] 2/3 Loading payfast_merchant_key...`);
-                merchantKey = await getSecret("payfast_merchant_key");
-                console.log(`[PayFast Config] ✅ payfast_merchant_key loaded: ${merchantKey?.substring(0, 5)}...`);
-            } catch (err) {
-                console.error(`[PayFast Config] ❌ Failed to load payfast_merchant_key:`, err.message);
-                throw new Error(`Secret 'payfast_merchant_key' not found: ${err.message}`);
-            }
-            
-            try {
-                console.log(`[PayFast Config] 3/3 Loading payfast_passphrase...`);
-                passphrase = await getSecret("payfast_passphrase");
-                console.log(`[PayFast Config] ✅ payfast_passphrase loaded`);
-            } catch (err) {
-                console.error(`[PayFast Config] ❌ Failed to load payfast_passphrase:`, err.message);
-                throw new Error(`Secret 'payfast_passphrase' not found: ${err.message}`);
-            }
-            
-            // Parse merchant ID to integer
-            this.config.merchantId = parseInt(merchantId, 10);
-            this.config.merchantKey = merchantKey;
-            this.config.passphrase = passphrase || '';
-            
-            console.log(`[PayFast Config] 📋 Parsed config - merchantId: ${this.config.merchantId}, merchantKey: ${this.config.merchantKey?.length} chars`);
-            
-            // Validate credentials
-            try {
-                this.validateCredentials();
-                console.log(`[PayFast Config] ✅ Credentials validated successfully`);
-            } catch (validationErr) {
-                console.error(`[PayFast Config] ❌ Credential validation failed:`, validationErr.message);
-                throw validationErr;
-            }
-            
-            this.isInitialized = true;
-            console.log(`[PayFast Config] 🎉 Configuration initialized successfully with correct secrets`);
-            
-        } catch (err) {
-            console.error('[PayFast Config] 💥 Configuration initialization failed:', err.message);
-            throw err;
-            
-        } catch (err) {
-            console.error('[PayFast Config] ❌ Configuration initialization failed:', err);
-            throw err;
-        }
-    }
+  async initialize() {
+    console.log('[PayFast Config] Initializing…');
 
-    /**
-     * Validate PayFast credentials
-     * @throws {Error} If credentials are invalid
-     */
-    validateCredentials() {
-        const { merchantId, merchantKey } = this.config;
-        
-        if (isNaN(merchantId) || merchantId <= 0) {
-            throw new Error('PayFast merchant ID must be a valid positive integer');
-        }
-        
-        if (!merchantKey || merchantKey.length < 10) {
-            throw new Error('PayFast merchant key must be at least 10 characters');
-        }
-        
-        console.log('[PayFast Config] ✅ Credentials validated');
-    }
+    const environment = (await getSecret('payfastEnvironment').catch(() => 'sandbox')) || 'sandbox';
+    this.config.environment = environment;
 
-    /**
-     * Get PayFast payment gateway URL based on environment
-     * @returns {string} PayFast payment URL
-     */
-    getPaymentUrl() {
-        this.ensureInitialized();
-        return this.config.urls[this.config.environment];
-    }
+    const merchantId = await getSecret('payfast_merchant_id').catch(() => null);
+    const merchantKey = await getSecret('payfast_merchant_key').catch(() => null);
+    const passphrase = await getSecret('payfast_passphrase').catch(() => '');
 
-    /**
-     * Get merchant credentials
-     * @returns {object} Merchant credentials
-     */
-    getCredentials() {
-        this.ensureInitialized();
-        return {
-            merchantId: this.config.merchantId,
-            merchantKey: this.config.merchantKey,
-            passphrase: this.config.passphrase
-        };
-    }
+    if (!merchantId) throw new Error("Secret 'payfast_merchant_id' not set");
+    if (!merchantKey) throw new Error("Secret 'payfast_merchant_key' not set");
 
-    /**
-     * Check if running in sandbox mode
-     * @returns {boolean} True if sandbox mode
-     */
-    isSandbox() {
-        this.ensureInitialized();
-        return this.config.environment === 'sandbox';
-    }
+    this.config.merchantId = parseInt(merchantId, 10);
+    this.config.merchantKey = merchantKey;
+    this.config.passphrase = passphrase || '';
 
-    /**
-     * Get environment name
-     * @returns {string} Environment name
-     */
-    getEnvironment() {
-        this.ensureInitialized();
-        return this.config.environment;
-    }
+    this.validateCredentials();
+    this.isInitialized = true;
 
-    /**
-     * Ensure configuration is initialized
-     * @throws {Error} If not initialized
-     */
-    ensureInitialized() {
-        if (!this.isInitialized) {
-            throw new Error('PayFast configuration not initialized. Call initialize() first.');
-        }
-    }
+    console.log('[PayFast Config] ✅ Ready:', this.getConfigSummary());
+  }
 
-    /**
-     * Get sandbox-specific settings
-     * @returns {object} Sandbox configuration
-     */
-    getSandboxConfig() {
-        return {
-            merchantId: 10000100,  // PayFast sandbox merchant ID
-            merchantKey: '46f0cd694581a',  // PayFast sandbox merchant key
-            testMode: true,
-            skipSignatureValidation: false // Still validate signatures in sandbox
-        };
-    }
+  validateCredentials() {
+    const { merchantId, merchantKey } = this.config;
+    if (isNaN(merchantId) || merchantId <= 0) throw new Error('Invalid PayFast merchant ID');
+    if (!merchantKey || merchantKey.length < 10) throw new Error('Invalid PayFast merchant key');
+  }
 
-    /**
-     * Get configuration summary for logging
-     * @returns {object} Safe configuration summary (no secrets)
-     */
-    getConfigSummary() {
-        this.ensureInitialized();
-        return {
-            environment: this.config.environment,
-            merchantId: this.config.merchantId,
-            merchantKeyLength: this.config.merchantKey?.length,
-            hasPassphrase: !!this.config.passphrase,
-            paymentUrl: this.getPaymentUrl()
-        };
-    }
+  getPaymentUrl() { this.ensure(); return this.config.urls[this.config.environment]; }
+  getCredentials() { this.ensure(); return { merchantId: this.config.merchantId, merchantKey: this.config.merchantKey, passphrase: this.config.passphrase }; }
+  isSandbox() { this.ensure(); return this.config.environment === 'sandbox'; }
+  getEnvironment() { this.ensure(); return this.config.environment; }
+  ensure() { if (!this.isInitialized) throw new Error('PayFast config not initialized'); }
+
+  getConfigSummary() {
+    this.ensure();
+    return {
+      environment: this.config.environment,
+      merchantId: this.config.merchantId,
+      merchantKeyLength: this.config.merchantKey?.length,
+      hasPassphrase: !!this.config.passphrase,
+      paymentUrl: this.getPaymentUrl()
+    };
+  }
 }
 
-// Global instance
-const payfastConfig = new PayFastConfig();
+const singleton = new PayFastConfig();
 
-// Export functions for easy use
 export async function getPayFastConfig() {
-    if (!payfastConfig.isInitialized) {
-        await payfastConfig.initialize();
-    }
-    return payfastConfig;
+  if (!singleton.isInitialized) await singleton.initialize();
+  return singleton;
 }
-
-export async function getPayFastCredentials() {
-    const config = await getPayFastConfig();
-    return config.getCredentials();
-}
-
-export async function getPayFastPaymentUrl() {
-    const config = await getPayFastConfig();
-    return config.getPaymentUrl();
-}
-
-export async function isPayFastSandbox() {
-    const config = await getPayFastConfig();
-    return config.isSandbox();
-}
+export async function getPayFastCredentials() { return (await getPayFastConfig()).getCredentials(); }
+export async function getPayFastPaymentUrl() { return (await getPayFastConfig()).getPaymentUrl(); }
+export async function isPayFastSandbox() { return (await getPayFastConfig()).isSandbox(); }

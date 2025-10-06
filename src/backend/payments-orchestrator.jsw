@@ -1,0 +1,107 @@
+// === backend/payments-orchestrator.jsw ===
+import { getSecret } from 'wix-secrets-backend';
+import { fetch } from 'wix-fetch';
+import wixUsersBackend from 'wix-users-backend';
+import { updateProfile, sendPostPaymentNotifications } from 'backend/profile-utils.jsw';
+
+const PAYSTACK_BASE = 'https://api.paystack.co';
+
+// ---------- Helper: get Authorization Header ----------
+async function authHeader() {
+  const key = await getSecret('paystack_secret_key_live');
+  return {
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json'
+  };
+}
+
+// ---------- 1. Start Sign-Up Payment ----------
+export async function startSignUpPayment({ amountZAR, metadata = {} }) {
+  const user = wixUsersBackend.currentUser;
+  if (!user?.id) throw new Error('User not logged in');
+
+  const email = await user.getEmail();
+  const body = {
+    amount: amountZAR * 100, // convert ZAR to kobo
+    email,
+    metadata: { userId: user.id, purpose: 'signup_fee', ...metadata },
+    callback_url: 'https://www.emergitag.me/signup-success'
+  };
+
+  const r = await fetch(`${PAYSTACK_BASE}/transaction/initialize`, {
+    method: 'post',
+    headers: await authHeader(),
+    body: JSON.stringify(body)
+  });
+
+  const j = await r.json();
+  if (!j.status) throw new Error(j.message || 'Paystack init failed');
+  return j.data; // { authorization_url, reference }
+}
+
+// ---------- 2. Verify Payment ----------
+export async function verifySignUp(reference) {
+  const r = await fetch(`${PAYSTACK_BASE}/transaction/verify/${reference}`, {
+    headers: await authHeader()
+  });
+  const j = await r.json();
+  if (!j.status) throw new Error(j.message || 'Verification failed');
+
+  const data = j.data;
+  if (data.status !== 'success') throw new Error('Payment not successful');
+
+  // Update CMS via your existing utilities
+  await updateProfile({
+    signUpPaid: true,
+    signUpReference: reference,
+    lastPaymentDate: new Date(),
+    signupGateway: 'paystack'
+  });
+
+  // Fire your post-payment workflow
+  await sendPostPaymentNotifications(data.metadata?.userId || wixUsersBackend.currentUser.id, reference);
+
+  return { ok: true, data };
+}
+
+// ---------- 3. Create Paystack Subscription ----------
+export async function createSubscription({ planCode }) {
+  const user = wixUsersBackend.currentUser;
+  if (!user?.id) throw new Error('Not logged in');
+
+  const email = await user.getEmail();
+
+  // Retrieve customer’s last authorization (from CMS if stored)
+  const res = await fetch(`${PAYSTACK_BASE}/customer/${email}`, {
+    headers: await authHeader()
+  });
+  const cust = await res.json();
+  if (!cust.status) throw new Error('Could not find customer');
+
+  const authorization = cust.data.authorization?.authorization_code;
+  if (!authorization) throw new Error('No saved authorization for customer');
+
+  const subBody = {
+    customer: email,
+    plan: planCode,
+    authorization
+  };
+
+  const s = await fetch(`${PAYSTACK_BASE}/subscription`, {
+    method: 'post',
+    headers: await authHeader(),
+    body: JSON.stringify(subBody)
+  });
+
+  const sub = await s.json();
+  if (!sub.status) throw new Error(sub.message || 'Subscription failed');
+
+  await updateProfile({
+    membershipTier: planCode,
+    planStatus: 'active',
+    subscriptionId: sub.data.subscription_code,
+    subscriptionActive: true
+  });
+
+  return { ok: true, subscription: sub.data };
+}

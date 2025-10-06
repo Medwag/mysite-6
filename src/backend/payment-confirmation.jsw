@@ -1,0 +1,55 @@
+// === backend/payment-confirmation.jsw ===
+// Unified payment confirmation for Paystack + PayFast
+
+import { verifyPaystackRef } from 'backend/paystack.jsw';
+import { finalizePayFastPayment } from 'backend/payfast.jsw'; // we’ll add this next
+import { updateProfileByUserId, sendPostPaymentNotifications } from 'backend/profile-utils.jsw';
+import { sendDiscordLog } from 'backend/logger.jsw';
+
+/**
+ * Called after Paystack or PayFast redirect or webhook
+ * @param {Object} data
+ * @param {'paystack'|'payfast'} data.gateway
+ * @param {string} data.reference - Paystack reference or PayFast payment ID
+ * @param {string} [data.userId]
+ */
+export async function confirmPayment({ gateway, reference, userId }) {
+  try {
+    sendDiscordLog(`🧾 Confirming payment via ${gateway} for ${userId || 'unknown'}`);
+
+    if (gateway === 'paystack') {
+      const result = await verifyPaystackRef(reference);
+      if (result.status !== 'success') throw new Error(`Paystack status: ${result.status}`);
+      await updateProfileByUserId(result.metadata.userId || userId, {
+        signupPaid: true,
+        signupAmount: result.amount / 100,
+        signupGateway: 'paystack',
+        signUpReference: reference,
+        lastPaymentDate: new Date(),
+      });
+      await sendPostPaymentNotifications(result.metadata.userId || userId, reference);
+      sendDiscordLog(`✅ Paystack payment confirmed for ${result.customer.email}`);
+      return { ok: true, source: 'paystack', data: result };
+    }
+
+    if (gateway === 'payfast') {
+      const pf = await finalizePayFastPayment(reference);
+      if (!pf.ok) throw new Error('PayFast finalization failed');
+      await updateProfileByUserId(pf.userId || userId, {
+        signupPaid: true,
+        signupAmount: pf.amount,
+        signupGateway: 'payfast',
+        signUpReference: pf.reference,
+        lastPaymentDate: new Date(),
+      });
+      await sendPostPaymentNotifications(pf.userId || userId, pf.reference);
+      sendDiscordLog(`✅ PayFast payment confirmed for user ${pf.userId}`);
+      return { ok: true, source: 'payfast', data: pf };
+    }
+
+    throw new Error(`Unknown gateway: ${gateway}`);
+  } catch (err) {
+    sendDiscordLog(`❌ Payment confirmation failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+}

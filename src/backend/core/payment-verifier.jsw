@@ -1,0 +1,42 @@
+// === backend/core/payment-verifier.jsw ===
+import { verifyPaystackRef } from 'backend/paystack.jsw';
+import { finalizePayFastPayment } from 'backend/payfast.jsw';
+import { updateProfileByUserId } from 'backend/profile-utils.jsw';
+import { sendPostPaymentNotifications } from 'backend/profile-utils.jsw';
+import { sendDiscordLog } from 'backend/logger.jsw';
+
+export async function verifyAndSyncPayment({ userId, reference, provider }) {
+    try {
+        sendDiscordLog(`🔍 Verifying ${provider} payment for ${userId} [${reference}]`);
+
+        let verified = null;
+
+        if (provider === 'paystack') {
+            verified = await verifyPaystackRef(reference);
+            if (verified.status !== 'success') throw new Error(`Paystack status: ${verified.status}`);
+        }
+
+        if (provider === 'payfast') {
+            verified = await finalizePayFastPayment(reference);
+            if (!verified.ok) throw new Error('PayFast verification failed');
+        }
+
+        // --- Update CMS ---
+        await updateProfileByUserId(userId, {
+            signupPaid: true,
+            signupGateway: provider,
+            signUpReference: reference,
+            lastPaymentDate: new Date(),
+            signUpAmount: verified.amount ? verified.amount / 100 : 150,
+        });
+
+        // --- Send welcome notifications ---
+        await sendPostPaymentNotifications(userId, reference);
+
+        sendDiscordLog(`✅ Payment verified + CMS updated for ${userId} via ${provider}`);
+        return { success: true, provider, verified };
+    } catch (err) {
+        sendDiscordLog(`❌ Payment verification failed for ${userId}: ${err.message}`);
+        return { success: false, error: err.message };
+    }
+}

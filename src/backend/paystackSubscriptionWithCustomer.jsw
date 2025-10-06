@@ -1,127 +1,105 @@
-import { getPaystackSecretKey, PAYSTACK_CONFIG } from './paystack-config.jsw';
-import { fetch } from 'wix-fetch';
+// backend/paystackSubscriptionWithCustomer.jsw
 import wixData from 'wix-data';
-import { getPlanByName } from './plan-utils.jsw';
+import { fetch } from 'wix-fetch';
+import { getPaystackSecretKey, PAYSTACK_CONFIG } from 'backend/paystack-config.jsw';
+import { getPlanByName } from 'backend/plan-utils.jsw';
 
 /**
  * Create Paystack subscription for a user
- * @param {String} planTier - Bronze / Silver / Gold / Pet / Family / Family Extended
- * @param {String} billingCycle - Monthly / Annual
- * @param {String} userId - Wix User ID (_owner in Emergency_Profiles)
+ * @param {String} planTier - e.g. Bronze / Silver / Gold / Pet / Family / Family Extended
+ * @param {String} billingCycle - "Monthly" | "Annual"
+ * @param {String} userId - Wix User ID (_owner)
  */
 export async function createSubscriptionWithCustomer(planTier, billingCycle, userId) {
-    if (!userId) throw new Error("User ID is required");
+  if (!userId) throw new Error('User ID is required');
 
-    // --- FETCH PROFILE BY _owner ---
-    const profileQuery = await wixData.query("Emergency_Profiles")
-        .eq("_owner", userId)
-        .limit(1)
-        .find();
+  // Profile by _owner
+  const q = await wixData.query('Emergency_Profiles').eq('_owner', userId).limit(1).find({ suppressAuth: true });
+  if (!q.items.length) return { success: false, message: 'No profile found for user' };
 
-    if (!profileQuery.items.length) {
-        return { success: false, message: "No Paystack customer_code found for this user" };
+  const profile = q.items[0];
+  const customerCode = profile.paystackCustomerCode || profile.customerCode || null; // tolerate older data
+  if (!customerCode) {
+    return { success: false, message: 'No Paystack customer code found on profile (paystackCustomerCode).' };
+  }
+
+  // Plan codes from CMS
+  const plan = await getPlanByName(planTier);
+  if (!plan) return { success: false, message: `Plan not found: ${planTier}` };
+
+  const isAnnual = String(billingCycle).trim().toLowerCase() === 'annual';
+  const planCode = isAnnual ? (plan.paystackPlanCodeAnnual || plan.paystackPlanCode) : plan.paystackPlanCode;
+  if (!planCode) return { success: false, message: `Missing Paystack plan code for ${planTier} (${billingCycle})` };
+
+  const secret = await getPaystackSecretKey();
+  const body = { customer: customerCode, plan: planCode, metadata: { userId, planTier, billingCycle } };
+
+  try {
+    const r = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/subscription`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const j = await r.json();
+
+    if (j.status) {
+      // Mark active locally (Paystack may still ask for auth if needed)
+      await wixData.update('Emergency_Profiles', {
+        _id: profile._id,
+        membershipTier: planTier,
+        subscriptionActive: true,
+        planStatus: 'active',
+        lastPaymentDate: new Date()
+      }, { suppressAuth: true });
+
+      // Some responses return an authorization_url; if present, send user to it
+      return { success: true, authorization_url: j.data?.authorization_url || null };
     }
 
-    const profile = profileQuery.items[0];
-    if (!profile.customerCode) {
-        return { success: false, message: "Profile does not have a Paystack customer_code" };
+    // if already subscribed
+    if ((j.message || '').toLowerCase().includes('already')) {
+      await wixData.update('Emergency_Profiles', {
+        _id: profile._id,
+        membershipTier: planTier,
+        subscriptionActive: true,
+        planStatus: 'active',
+        lastPaymentDate: new Date()
+      }, { suppressAuth: true });
+      return { success: true, alreadySubscribed: true, message: 'Subscription already in place.' };
     }
 
-    // --- GET PLAN DATA FROM CMS ---
-    const plan = await getPlanByName(planTier);
-    if (!plan) {
-        return { success: false, message: `Plan not found: ${planTier}` };
-    }
-
-    const isAnnual = billingCycle.trim().toLowerCase() === 'annual';
-    const planCode = isAnnual ? plan.paystackPlanCodeAnnual : plan.paystackPlanCode;
-    
-    if (!planCode) {
-        return { success: false, message: `Plan code not configured for ${planTier} (${billingCycle})` };
-    }
-
-    const secretKey = await getPaystackSecretKey();
-
-    // --- CREATE SUBSCRIPTION ---
-    const body = {
-        customer: profile.customerCode,
-        plan: planCode,
-        metadata: { userId, planTier, billingCycle },
-        callback_url: "https://www.emergitag.me/subscription-confirmation"
-    };
-
-    try {
-        const response = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/subscription`, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${secretKey}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(body)
-        });
-
-        const result = await response.json();
-
-        if (result.status) {
-            // --- AUTO-UPDATE PROFILE ---
-            profile.membershipTier = planTier;
-            profile.subscriptionActive = true;
-            profile.planStatus = "active";
-            await wixData.update("Emergency_Profiles", profile);
-
-            return { success: true, authorization_url: result.data.authorization_url };
-        } else if (result.message && result.message.includes("already in place")) {
-            // Subscription already exists — also update profile
-            profile.membershipTier = planTier;
-            profile.subscriptionActive = true;
-            profile.planStatus = "active";
-            await wixData.update("Emergency_Profiles", profile);
-
-            return { success: true, alreadySubscribed: true, message: "This subscription is already in place." };
-        } else {
-            return { success: false, message: result.message || "Unknown error creating subscription" };
-        }
-    } catch (err) {
-        console.error("❌ Paystack subscription error:", err);
-        return { success: false, message: err.message || "Unable to create subscription" };
-    }
+    return { success: false, message: j.message || 'Unknown error creating subscription' };
+  } catch (err) {
+    console.error('❌ Paystack subscription error:', err);
+    return { success: false, message: err.message || 'Unable to create subscription' };
+  }
 }
 
-/**
- * Verify subscription transaction
- * @param {String} reference - Paystack subscription reference
- */
 export async function verifySubscription(reference) {
-    if (!reference) throw new Error("Reference is required");
+  if (!reference) throw new Error('Reference is required');
+  const secret = await getPaystackSecretKey();
+  const r = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/transaction/verify/${reference}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${secret}` }
+  });
+  const j = await r.json();
+  if (!j.status) throw new Error(j.message || 'Failed to verify subscription');
 
-    const secretKey = await getPaystackSecretKey();
+  if (j.data?.status !== 'success') throw new Error('Subscription not successful');
 
-    const response = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/transaction/verify/${reference}`, {
-        method: "GET",
-        headers: { "Authorization": `Bearer ${secretKey}` }
-    });
+  const { email, metadata } = j.data;
+  const q = await wixData.query('Emergency_Profiles').eq('_owner', metadata.userId).limit(1).find({ suppressAuth: true });
+  if (!q.items.length) throw new Error('Emergency profile not found for user during verification');
 
-    const result = await response.json();
-    if (!result.status) throw new Error(result.message || "Failed to verify subscription");
+  const profile = q.items[0];
+  await wixData.update('Emergency_Profiles', {
+    _id: profile._id,
+    membershipTier: metadata.planTier,
+    email: email || profile.email,
+    subscriptionActive: true,
+    planStatus: 'active',
+    lastPaymentDate: new Date()
+  }, { suppressAuth: true });
 
-    const { email, metadata, status } = result.data;
-    if (status !== "success") throw new Error("Subscription not successful");
-
-    // --- UPDATE PROFILE USING _owner QUERY ---
-    const profileQuery = await wixData.query("Emergency_Profiles")
-        .eq("_owner", metadata.userId)
-        .limit(1)
-        .find();
-
-    if (!profileQuery.items.length) {
-        throw new Error("Emergency profile not found for user during verification");
-    }
-
-    const profile = profileQuery.items[0];
-    profile.membershipTier = metadata.planTier;
-    profile.email = email;
-
-    await wixData.update("Emergency_Profiles", profile);
-
-    return { success: true, tier: metadata.planTier };
+  return { success: true, tier: metadata.planTier };
 }

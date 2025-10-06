@@ -1,0 +1,26 @@
+// backend/paystack-config.jsw
+import { getSecret } from 'wix-secrets-backend';
+
+export const PAYSTACK_CONFIG = {
+  API_BASE_URL: 'https://api.paystack.co'
+};
+
+let cached = null;
+
+export async function getPaystackSecretKey() {
+  if (cached) return cached;
+
+  // Secrets you must define in Wix → Settings → Secrets:
+  // - paystack_env             = "live" | "test" (default: "test")
+  // - paystack_secret_live     = Live secret key, e.g. sk_live_***
+  // - paystack_secret_test     = Test secret key, e.g. sk_test_***
+  const env = (await getSecret('paystack_env').catch(() => 'test')) || 'test';
+  const live = await getSecret('paystack_secret_live').catch(() => null);
+  const test = await getSecret('paystack_secret_test').catch(() => null);
+
+  if (env === 'live' && !live) throw new Error('Missing secret: paystack_secret_live');
+  if (env !== 'live' && !test) throw new Error('Missing secret: paystack_secret_test');
+
+  cached = env === 'live' ? live : test;
+  return cached;
+}

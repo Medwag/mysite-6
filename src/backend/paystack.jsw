@@ -1,29 +1,152 @@
-// backend/paystack.jsw
+// === backend/paystack.jsw ===
+// ✅ Merged version: combines your existing payment init + extended logic
+
 import { fetch } from 'wix-fetch';
+import wixUsersBackend from 'wix-users-backend';
 import { getPaystackSecretKey, PAYSTACK_CONFIG } from 'backend/paystack-config.jsw';
 import { sendDiscordLog } from 'backend/logger.jsw';
+import { getOrCreateProfile, updateProfile } from 'backend/profile-utils.jsw';
 
+// ----------------------------------------------------
+// 🧩 Helpers
+// ----------------------------------------------------
+async function authHeader() {
+  const key = await getPaystackSecretKey();
+  return { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+}
+
+function getSiteUrl() {
+  return 'https://www.emergitag.me';
+}
+
+// ----------------------------------------------------
+// 1️⃣ Once-off Sign-up Fee (existing function, retained)
+// ----------------------------------------------------
 export async function createPaystackPayment(userId, email) {
-    const secretKey = await getPaystackSecretKey();
-    const url = `${PAYSTACK_CONFIG.API_BASE_URL}/transaction/initialize`;
+  const secretKey = await getPaystackSecretKey();
+  const url = `${PAYSTACK_CONFIG.API_BASE_URL}/transaction/initialize`;
 
-    const payload = {
-        email,
-        amount: 15000, // kobo
-        metadata: { userId, type: "signup" },
-        callback_url: "https://www.emergitag.me/signup-success"
-    };
+  const payload = {
+    email,
+    amount: 15000, // 150 ZAR in kobo
+    metadata: { userId, purpose: "signup_fee" },
+    callback_url: `${getSiteUrl()}/signup-success`
+  };
 
-    const response = await fetch(url, {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${secretKey}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-    });
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${secretKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
 
-    const result = await response.json();
-    sendDiscordLog("📤 Paystack init: " + JSON.stringify(result));
-    return result.data.authorization_url;
+  const result = await response.json();
+  sendDiscordLog("📤 Paystack init: " + JSON.stringify(result));
+  if (!result.status) throw new Error(result.message || "Paystack init failed");
+  return result.data.authorization_url;
+}
+
+// ----------------------------------------------------
+// 2️⃣ Verify Sign-up Fee Payment
+// ----------------------------------------------------
+export async function verifyPaystackRef(reference) {
+  const r = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/transaction/verify/${reference}`, {
+    headers: await authHeader()
+  });
+  const j = await r.json();
+  if (!j.status) throw new Error(j.message || 'Verification failed');
+  return j.data;
+}
+
+// ----------------------------------------------------
+// 3️⃣ Create/Get a Paystack Plan (monthly / yearly)
+// ----------------------------------------------------
+export async function ensurePaystackPlan({ name, interval, amountKobo, description }) {
+  const body = { name, interval, amount: amountKobo, description };
+  const r = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/plan`, {
+    method: 'post',
+    headers: await authHeader(),
+    body: JSON.stringify(body)
+  });
+  const j = await r.json();
+  if (!j.status) throw new Error(j.message || 'Create plan failed');
+  return j.data; // { plan_code, ... }
+}
+
+// ----------------------------------------------------
+// 4️⃣ Create a Subscription (using authorization from first charge)
+// ----------------------------------------------------
+export async function createPaystackSubscription({ customerEmail, planCode, authorizationCode }) {
+  const body = { customer: customerEmail, plan: planCode, authorization: authorizationCode };
+  const r = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/subscription`, {
+    method: 'post',
+    headers: await authHeader(),
+    body: JSON.stringify(body)
+  });
+  const j = await r.json();
+  if (!j.status) throw new Error(j.message || 'Create subscription failed');
+  sendDiscordLog(`✅ Paystack Subscription Created: ${JSON.stringify(j.data)}`);
+  return j.data;
+}
+
+// ----------------------------------------------------
+// 5️⃣ Finalize Signup (after returning from Paystack)
+// ----------------------------------------------------
+export async function finalizeSignupFromReference({ reference, membershipTier, planCode }) {
+  const data = await verifyPaystackRef(reference);
+  if (data.status !== 'success') throw new Error('Payment not successful');
+
+  const auth = data.authorization; // contains authorization_code
+  const customerEmail = data.customer?.email;
+
+  const profile = await getOrCreateProfile();
+  await updateProfile({
+    signupPaid: true,
+    signupAmount: data.amount / 100,
+    signupGateway: 'paystack',
+    paystackCustomerId: data.customer?.id ? String(data.customer.id) : '',
+    paystackAuthCode: auth?.authorization_code || '',
+    membershipTier,
+    planCode,
+    lastPaymentDate: new Date()
+  });
+
+  // Auto-create subscription if planCode provided
+  if (planCode && auth?.authorization_code) {
+    try {
+      const sub = await createPaystackSubscription({
+        customerEmail,
+        planCode,
+        authorizationCode: auth.authorization_code
+      });
+      await updateProfile({
+        subscriptionId: sub.subscription_code,
+        subscriptionStatus: 'active',
+        subscriptionActive: true
+      });
+      sendDiscordLog(`💳 Subscription Activated for ${customerEmail} (${planCode})`);
+    } catch (err) {
+      sendDiscordLog(`⚠️ Subscription creation failed for ${customerEmail}: ${err.message}`);
+    }
+  }
+
+  return { ok: true, data };
+}
+
+// ----------------------------------------------------
+// 6️⃣ Utility - Create customer if needed
+// ----------------------------------------------------
+export async function createPaystackCustomer(email) {
+  const body = { email };
+  const r = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/customer`, {
+    method: 'post',
+    headers: await authHeader(),
+    body: JSON.stringify(body)
+  });
+  const j = await r.json();
+  if (!j.status) throw new Error(j.message || 'Customer creation failed');
+  sendDiscordLog(`👤 Paystack customer created: ${JSON.stringify(j.data)}`);
+  return j.data;
 }
