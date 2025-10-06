@@ -11,13 +11,13 @@ $w.onReady(async function () {
     console.log("🚀 Sign-up Page Loaded");
     
     // Cache elements
-    const paystackBtn = $w('#paystackPayButton');
-    const payfastBtn = $w('#payfastPayButton');
-    const openSignUp = $w('#openSignUp');
-    const goSubBtn = $w('#goToSubscriptionButton');
-    const goDashBtn = $w('#goToDashboardButton');
-    const statusText = $w('#statusText');
-    const formContainer = $w('#formContainer');
+    const paystackBtn1 = $w('#paystackPayButton');
+    const payfastBtn1 = $w('#payfastPayButton');
+    const openSignUp1 = $w('#openSignUp');
+    const goSubBtn1 = $w('#goToSubscriptionButton');
+    const goDashBtn1 = $w('#goToDashboardButton');
+    const statusText1 = $w('#statusText');
+    const formContainer1 = $w('#formContainer');
 
     // Initial state
     paystackBtn.hide();
