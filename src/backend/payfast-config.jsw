@@ -45,29 +45,60 @@ class PayFastConfig {
             
             this.config.environment = environment;
             
-            // Get credentials using the actual secret names
+            // Force direct secret loading with the correct names
+            console.log(`[PayFast Config] 🔑 Loading secrets: payfast_merchant_id, payfast_merchant_key, payfast_passphrase`);
+            
+            let merchantId, merchantKey, passphrase;
+            
             try {
-                const merchantId = await getSecret("payfast_merchant_id");
-                const merchantKey = await getSecret("payfast_merchant_key");
-                const passphrase = await getSecret("payfast_passphrase");
-                
-                console.log(`[PayFast Config] Retrieved secrets - merchantId: ${merchantId}, merchantKey: ${merchantKey ? 'present' : 'missing'}, passphrase: ${passphrase ? 'present' : 'missing'}`);
-                
-                // Parse merchant ID to integer
-                this.config.merchantId = parseInt(merchantId, 10);
-                this.config.merchantKey = merchantKey;
-                this.config.passphrase = passphrase || '';
-                
-                // Validate credentials
-                this.validateCredentials();
-                
-                this.isInitialized = true;
-                console.log(`[PayFast Config] ✅ Successfully initialized with actual secrets`);
-                
+                console.log(`[PayFast Config] 1/3 Loading payfast_merchant_id...`);
+                merchantId = await getSecret("payfast_merchant_id");
+                console.log(`[PayFast Config] ✅ payfast_merchant_id loaded: ${merchantId}`);
             } catch (err) {
-                console.error(`[PayFast Config] ❌ Failed to load PayFast credentials:`, err);
-                throw new Error(`PayFast credentials not configured in Wix Secrets. Required: payfast_merchant_id, payfast_merchant_key, payfast_passphrase`);
+                console.error(`[PayFast Config] ❌ Failed to load payfast_merchant_id:`, err.message);
+                throw new Error(`Secret 'payfast_merchant_id' not found: ${err.message}`);
             }
+            
+            try {
+                console.log(`[PayFast Config] 2/3 Loading payfast_merchant_key...`);
+                merchantKey = await getSecret("payfast_merchant_key");
+                console.log(`[PayFast Config] ✅ payfast_merchant_key loaded: ${merchantKey?.substring(0, 5)}...`);
+            } catch (err) {
+                console.error(`[PayFast Config] ❌ Failed to load payfast_merchant_key:`, err.message);
+                throw new Error(`Secret 'payfast_merchant_key' not found: ${err.message}`);
+            }
+            
+            try {
+                console.log(`[PayFast Config] 3/3 Loading payfast_passphrase...`);
+                passphrase = await getSecret("payfast_passphrase");
+                console.log(`[PayFast Config] ✅ payfast_passphrase loaded`);
+            } catch (err) {
+                console.error(`[PayFast Config] ❌ Failed to load payfast_passphrase:`, err.message);
+                throw new Error(`Secret 'payfast_passphrase' not found: ${err.message}`);
+            }
+            
+            // Parse merchant ID to integer
+            this.config.merchantId = parseInt(merchantId, 10);
+            this.config.merchantKey = merchantKey;
+            this.config.passphrase = passphrase || '';
+            
+            console.log(`[PayFast Config] 📋 Parsed config - merchantId: ${this.config.merchantId}, merchantKey: ${this.config.merchantKey?.length} chars`);
+            
+            // Validate credentials
+            try {
+                this.validateCredentials();
+                console.log(`[PayFast Config] ✅ Credentials validated successfully`);
+            } catch (validationErr) {
+                console.error(`[PayFast Config] ❌ Credential validation failed:`, validationErr.message);
+                throw validationErr;
+            }
+            
+            this.isInitialized = true;
+            console.log(`[PayFast Config] 🎉 Configuration initialized successfully with correct secrets`);
+            
+        } catch (err) {
+            console.error('[PayFast Config] 💥 Configuration initialization failed:', err.message);
+            throw err;
             
         } catch (err) {
             console.error('[PayFast Config] ❌ Configuration initialization failed:', err);
