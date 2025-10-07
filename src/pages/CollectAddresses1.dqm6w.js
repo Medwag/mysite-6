@@ -1,4 +1,22 @@
-function enableAddressFieldsAggressively(){ try{}catch(_){} }
+function enableAddressFieldsAggressively() {
+    try {
+        const ids = ['#homeAddress', '#deliveryAddress'];
+        const attempt = () => {
+            ids.forEach(id => {
+                try {
+                    const f = $w(id);
+                    if (!f) return;
+                    if (typeof f.enable === 'function') f.enable();
+                    if (typeof f.show === 'function') f.show();
+                    try { f.readOnly = false; } catch {}
+                    try { f.required = false; } catch {}
+                    try { if (typeof f.resetValidityIndication === 'function') f.resetValidityIndication(); } catch {}
+                } catch (_) {}
+            });
+        };
+        [0, 100, 300, 600].forEach(ms => setTimeout(attempt, ms));
+    } catch (_) {}
+}
 // ✅ frontend/lightboxes/CollectAddresses.js
 import wixWindow from 'wix-window';
 import wixUsers from 'wix-users';
@@ -817,6 +835,7 @@ $w.onReady(async () => {
         }, 50);
     });
 });
+
 
 
 
