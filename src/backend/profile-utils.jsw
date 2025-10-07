@@ -116,7 +116,11 @@ export async function saveEmergencyProfile(profileData) {
         signUpPaid: false,
         dateCreated: baseProfile?.dateCreated || new Date(),
         updatedAt: new Date(),
-        publicViewId: publicViewId
+        publicViewId: publicViewId,
+        // Mirror into requested auxiliary CMS fields
+        fullNameInput: fullName,
+        signUpPhoneNumber: phone,
+        address1Input: homeAddress
     };
 
     let savedProfile;

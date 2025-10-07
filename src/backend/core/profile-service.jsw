@@ -103,6 +103,17 @@ export class ProfileService {
                 lastUpdated: new Date()
             };
 
+            // Mirror canonical fields into auxiliary CMS fields when provided
+            if (typeof updateData.fullName === 'string') {
+                updateData.fullNameInput = updateData.fullName;
+            }
+            if (typeof updateData.phone === 'string') {
+                updateData.signUpPhoneNumber = updateData.phone;
+            }
+            if (typeof updateData.homeAddress === 'string' || (updateData.homeAddress && typeof updateData.homeAddress === 'object')) {
+                updateData.address1Input = updateData.homeAddress;
+            }
+
             // Remove any undefined values
             Object.keys(updateData).forEach(key => {
                 if (updateData[key] === undefined) {

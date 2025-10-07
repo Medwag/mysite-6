@@ -710,15 +710,15 @@ $w.onReady(async () => {
 
             // --- Collect form inputs ---
             const fullName = ($w('#inputFullName').value || '').trim();
-            const email = ($w('#inputEmail').value || '').trim();
+            const inputEmailVal = ($w('#inputEmail').value || '').trim();
             const phoneRaw = ($w('#inputPhone').value || '').trim();
             const waRaw = ($w('#inputWA').value || '').trim();
 
             const phone = formatPhone(phoneRaw);
             const whatsAppNumber = formatPhone(waRaw);
 
-            const smsConsent = !!$w('#SMSConsent').checked;
-            const waConsent = !!$w('#WAConsent').checked;
+            const smsConsent = !!($w('#SMSConsent') && $w('#SMSConsent').checked);
+            const waConsent = ($w('#WAConsent') && typeof $w('#WAConsent').checked === 'boolean') ? $w('#WAConsent').checked : undefined;
 
             // Get address values with debugging
             console.log('📍 [CollectAddresses] Reading address field values...');
@@ -753,7 +753,12 @@ $w.onReady(async () => {
                 throw new Error(`Please fill in the following required fields: ${fieldList}`);
             }
 
-            // --- Save profile ---
+            // Always prefer membership email over typed value
+            let membershipEmail = '';
+            try { membershipEmail = await user.getEmail(); } catch {}
+            const email = membershipEmail || inputEmailVal;
+
+            // --- Save profile (write both canonical and requested CMS fields) ---
             const { savedProfile } = await saveEmergencyProfile({
                 userId: user.id,
                 email,
@@ -763,7 +768,11 @@ $w.onReady(async () => {
                 smsConsent,
                 waConsent,
                 homeAddress,
-                deliveryAddress
+                deliveryAddress,
+                // Additional CMS fields per request
+                fullNameInput: fullName,
+                signUpPhoneNumber: phone,
+                address1Input: homeAddress
             });
 
             console.log('✅ Profile saved:', savedProfile);
