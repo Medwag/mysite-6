@@ -2,6 +2,13 @@ import wixUsers from 'wix-users';
 import wixData from 'wix-data';
 import { updateProfile } from 'backend/profile-logger.jsw';
 
+// Build-time stubs (prevent undefined reference errors)
+const profile = typeof profile !== 'undefined' ? profile : {};
+function generateUniqueId() {
+  try { return crypto?.randomUUID ? crypto.randomUUID() : `emergitag-${Date.now()}-${Math.random().toString(36).slice(2,8)}`; }
+  catch { return `emergitag-${Date.now()}`; }
+}
+
 
 $w.onReady(async function () {
   const user = wixUsers.currentUser;

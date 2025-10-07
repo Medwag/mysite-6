@@ -1,6 +1,7 @@
 import wixData from 'wix-data';
 import { fetch } from 'wix-fetch';
 import wixSecretsBackend from 'wix-secrets-backend';
+import { PAYSTACK_CONFIG, getPaystackSecretKey } from 'backend/paystack-config.jsw';
 
 // Safe crypto import - only load when needed
 let crypto = null;
@@ -22,7 +23,6 @@ async function getCrypto() {
  */
 export async function verifyPaystackPayment(reference) {
     try {
-        const { getPaystackSecretKey, PAYSTACK_CONFIG } = await import('./paystack-config.jsw');
         const secretKey = await getPaystackSecretKey();
         const url = `${PAYSTACK_CONFIG.API_BASE_URL}/transaction/verify/${reference}`;
 

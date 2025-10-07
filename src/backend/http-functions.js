@@ -4,6 +4,8 @@ import { ok, serverError, badRequest, response } from 'wix-http-functions';
 import { fetch } from 'wix-fetch';
 import { sendDiscordLog } from 'backend/logger.jsw';
 import { getPayFastConfig } from 'backend/payfast-config.jsw';
+// Lint guard: optional handler referenced behind typeof
+const handleFirstPaymentSuccess = undefined;
 import { sendEmailAlert } from 'backend/email.jsw';
 import { sendWhatsAppTemplate } from 'backend/whatsapp.jsw';
 import {

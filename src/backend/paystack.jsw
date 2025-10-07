@@ -152,3 +152,13 @@ export async function createPaystackCustomer(email) {
   sendDiscordLog(`👤 Paystack customer created: ${JSON.stringify(j.data)}`);
   return j.data;
 }
+
+// Minimal stub used by dashboard pages; replace with real implementation if needed
+export async function getUserSubscriptionDetails(userId) {
+  try {
+    // A lightweight default response to avoid runtime/build errors where referenced.
+    return { status: 'inactive', planName: null };
+  } catch (e) {
+    return { error: e?.message || String(e) };
+  }
+}

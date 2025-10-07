@@ -311,9 +311,12 @@ export async function handleSubscriptionSuccess(data) {
         });
 
         // Optionally: send subscription confirmation email
-        if (typeof emailClientSubscriptionActive === "function") {
-            await emailClientSubscriptionActive(userId, planName);
-        }
+        try {
+            const maybeEmailFn = /** @type {any} */ (self)?.emailClientSubscriptionActive;
+            if (typeof maybeEmailFn === 'function') {
+                await maybeEmailFn(userId, planName);
+            }
+        } catch (_) {}
 
     } catch (err) {
         console.error("❌ handleSubscriptionSuccess error:", err);
@@ -444,3 +447,4 @@ async function generatePublicViewId() {
     // Fallback if crypto is not available
     return Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
 }
+

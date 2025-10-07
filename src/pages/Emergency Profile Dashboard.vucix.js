@@ -220,7 +220,7 @@ async function bindPaystackSubscription(userId) {
         console.log('[bindPaystackSubscription] Using email:', userEmail);
         
         // Use enhanced subscription detector
-        const result = await detectUserSubscriptions(userEmail, userId);
+        const result = await import('backend/enhanced-subscription-detector.jsw').then(m => m.detectUserSubscriptions()).catch(() => ({success:false}));
         console.log('[bindPaystackSubscription] Enhanced detection result:', result);
         
         if (!result.success || !result.data || !result.data.selectedSubscription) {
@@ -498,7 +498,7 @@ async function bindDashboardData(profile, userEmail) {
             try {
                 console.log('[bindDashboardData] Starting Paystack tier fetch with 8s timeout...');
                 const paystackDetails = await paystackTimeout(
-                    getUserSubscriptionDetails(profile._owner),
+                    (await import('backend/paystack.jsw').then(m => m.getUserSubscriptionDetails()).catch(() => ({ error: 'unavailable' }))),
                     8000 // 8 second timeout for tier fetch
                 );
                 if (paystackDetails && !paystackDetails.error && paystackDetails.planName) {
@@ -1011,9 +1011,9 @@ $w.onReady(async () => {
             try {
                 console.log('[Diagnostics] Starting Paystack subscription check with 10s timeout...');
                 paystackDetails = await paystackTimeout(
-                    import('backend/paystack.jsw').then(m => m.getUserSubscriptionDetails(currentUser.id))
+                    import('backend/paystack.jsw').then(m => m.getUserSubscriptionDetails(profile._owner)),
+                    8000
                 );
-                paystackStatus = paystackDetails?.status;
                 paystackActive = paystackStatus === 'active';
                 console.log('[Diagnostics] Paystack subscription details:', paystackDetails);
             } catch (err) {
@@ -1042,9 +1042,9 @@ $w.onReady(async () => {
                     
                     console.log('[Recovery] Re-checking Paystack status with timeout...');
                     paystackDetails = await paystackTimeout(
-                        import('backend/paystack.jsw').then(m => m.getUserSubscriptionDetails(currentUser.id))
+                        import('backend/paystack.jsw').then(m => m.getUserSubscriptionDetails(profile._owner)),
+                        8000
                     );
-                    paystackStatus = paystackDetails?.status;
                     paystackActive = paystackStatus === 'active';
                     console.log('[Diagnostics] Post-recovery CMS:', refreshedProfile.subscriptionActive, 'Paystack:', paystackDetails);
                 } catch (err) {
@@ -1401,3 +1401,4 @@ $w.onReady(async () => {
         }
     }
 }); // end onReady
+

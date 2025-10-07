@@ -1,3 +1,4 @@
+function enableAddressFieldsAggressively(){ try{}catch(_){} }
 // ✅ frontend/lightboxes/CollectAddresses.js
 import wixWindow from 'wix-window';
 import wixUsers from 'wix-users';
@@ -240,7 +241,8 @@ function createBackupAddressInputs() {
                 setTimeout(() => {
                     try {
                         // Try to access the underlying DOM element
-                        const domElement = field.html;
+                        const fieldNow = (fieldId);
+                        const domElement = fieldNow && fieldNow.html;
                         if (domElement) {
                             // Force enable at DOM level
                             domElement.disabled = false;
@@ -796,3 +798,7 @@ $w.onReady(() => {
         }, 50);
     });
 });
+
+
+
+

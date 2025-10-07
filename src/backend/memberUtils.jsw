@@ -22,11 +22,11 @@ export async function getMemberDetails(_owner) {
                 // Add any other properties you need from the member object
             };
         } else {
-            console.warn("DEBUG Backend (memberUtils): Member not found for ID:", memberId);
+            console.warn("DEBUG Backend (memberUtils): Member not found for ID:", _owner);
             return null;
         }
     } catch (error) {
-        console.error("DEBUG Backend (memberUtils): Error getting member details for ID:", memberId, error);
+        console.error("DEBUG Backend (memberUtils): Error getting member details for ID:", _owner, error);
         throw new Error("Failed to retrieve member details."); // Re-throw to be caught on frontend
     }
 }
