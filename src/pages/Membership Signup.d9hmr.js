@@ -234,7 +234,7 @@ $w.onReady(async () => {
       safeText(elSubscribeInfo, 'Complete your once-off sign-up payment to choose a plan.');
       safeShow(elSubscribeInfo);
       // Make it actionable: open the data collection lightbox
-      safeOnClick(elSubscribeInfo, () => wixWindow.openLightbox('CollectAddresses1'));
+      safeOnClick(elSubscribeInfo, () => wixWindow.openLightbox('CollectAddresses'));
     } else {
       safeHide(elSubscribeInfo);
     }
