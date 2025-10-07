@@ -6,7 +6,7 @@ import { createPayfastPayment } from 'backend/payfast.jsw';
 import { getUserPaymentStatus } from 'backend/status.jsw';
 
 const CANDIDATES = {
-  signup:        ['#openSignUp', '#signup', '#btnSignUp', '#openSignup', '#openSignUpButton'],
+  signup:        ['openSignUp', 'signup', 'btnSignUp', 'openSignup', 'openSignUpButton'],
   subscribe:     ['#goToSubscriptionButton', '#subscribe', '#btnSubscribe', '#goToPlans', '#choosePlanButton'],
   dashboard:     ['#goToDashboardButton', '#dashboard', '#btnDashboard', '#dashboardButton'],
   form:          ['#formContainer', '#formContainer01', '#signupForm', '#signupFormContainer', '#formContainerdata', '#box61'],
