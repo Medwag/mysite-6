@@ -2,6 +2,7 @@
 // ✅ Merged version: combines your existing payment init + extended logic
 
 import { fetch } from 'wix-fetch';
+import wixData from 'wix-data';
 import wixUsersBackend from 'wix-users-backend';
 import { getPaystackSecretKey, PAYSTACK_CONFIG } from 'backend/paystack-config.jsw';
 import { sendDiscordLog } from 'backend/logger.jsw';
@@ -156,8 +157,58 @@ export async function createPaystackCustomer(email) {
 // Minimal stub used by dashboard pages; replace with real implementation if needed
 export async function getUserSubscriptionDetails(userId) {
   try {
-    // A lightweight default response to avoid runtime/build errors where referenced.
-    return { status: 'inactive', planName: null };
+    if (!userId) throw new Error('userId is required');
+
+    // 1) Resolve email for customer lookup
+    let email = null;
+    try {
+      const profQ = await wixData.query('Emergency_Profiles')
+        .eq('_owner', userId)
+        .limit(1)
+        .find({ suppressAuth: true });
+      if (profQ.items.length) {
+        email = profQ.items[0].emailAddress || profQ.items[0].email || null;
+      }
+    } catch (_) {}
+
+    if (!email) {
+      try {
+        const user = await wixUsersBackend.getUser(userId);
+        email = user?.contactDetails?.emails?.[0]?.email || null;
+      } catch (_) {}
+    }
+
+    if (!email) return { error: 'email_not_found' };
+
+    // 2) Find Paystack customer by email
+    const custRes = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/customer?email=${encodeURIComponent(email)}`, {
+      headers: await authHeader()
+    });
+    const custJson = await custRes.json();
+    const customer = Array.isArray(custJson?.data) ? custJson.data[0] : null;
+    const customerCode = customer?.customer_code || customer?.id;
+    if (!customerCode) return { status: 'inactive', planName: null };
+
+    // 3) Fetch subscriptions for the customer
+    const subRes = await fetch(`${PAYSTACK_CONFIG.API_BASE_URL}/subscription?customer=${encodeURIComponent(customerCode)}`, {
+      headers: await authHeader()
+    });
+    const subJson = await subRes.json();
+    const subs = Array.isArray(subJson?.data) ? subJson.data : [];
+    if (!subs.length) return { status: 'inactive', planName: null };
+
+    // Prefer active, else the most recent by next_payment_date
+    const active = subs.filter(s => s.status === 'active');
+    const chosen = (active.length ? active : subs)
+      .sort((a, b) => new Date(b.next_payment_date || 0) - new Date(a.next_payment_date || 0))[0];
+
+    return {
+      status: chosen?.status || 'inactive',
+      planName: chosen?.plan?.name || null,
+      subscription_code: chosen?.subscription_code || null,
+      email,
+      nextPaymentDate: chosen?.next_payment_date ? new Date(chosen.next_payment_date) : null
+    };
   } catch (e) {
     return { error: e?.message || String(e) };
   }
