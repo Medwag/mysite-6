@@ -3,6 +3,7 @@ import wixSecretsBackend from 'wix-secrets-backend';
 import { ok, serverError, badRequest, response } from 'wix-http-functions';
 import { fetch } from 'wix-fetch';
 import { sendDiscordLog } from 'backend/logger.jsw';
+import { getPayFastConfig } from 'backend/payfast-config.jsw';
 import { sendEmailAlert } from 'backend/email.jsw';
 import { sendWhatsAppTemplate } from 'backend/whatsapp.jsw';
 import {
@@ -202,5 +203,16 @@ export async function post_payfastWebhook(request) {
     console.error('❌ PayFast ITN error:', err);
     await sendDiscordLog(`❌ PayFast ITN error: ${err.message}`);
     return serverError({ body: { error: err.message } });
+  }
+}
+
+/* === Diagnostics: PayFast config health === */
+export async function get_testPayfastConfig(request) {
+  try {
+    const cfg = await getPayFastConfig();
+    const summary = cfg.getConfigSummary ? cfg.getConfigSummary() : { environment: cfg.getEnvironment?.(), paymentUrl: cfg.getPaymentUrl?.() };
+    return ok({ body: { ok: true, summary } });
+  } catch (err) {
+    return serverError({ body: { ok: false, error: err.message } });
   }
 }

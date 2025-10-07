@@ -9,7 +9,7 @@ const CANDIDATES = {
   signup:        ['#openSignUp', '#signup', '#btnSignUp', '#openSignup', '#openSignUpButton'],
   subscribe:     ['#goToSubscriptionButton', '#subscribe', '#btnSubscribe', '#goToPlans', '#choosePlanButton'],
   dashboard:     ['#goToDashboardButton', '#dashboard', '#btnDashboard', '#dashboardButton'],
-  form:          ['#formContainer', '#formContainer01', '#signupForm', '#signupFormContainer', '#formContainerdata'],
+  form:          ['#formContainer', '#formContainer01', '#signupForm', '#signupFormContainer', '#formContainerdata', '#box61'],
   paystack:      ['#paystackPayButton', '#paystackPaymentButton', '#btnPaystack', '#paystack'],
   payfast:       ['#payfastPayButton', '#payfastPaymentButton', '#btnPayfast', '#payfast'],
   status:        ['#membersStatus', '#statusText', '#status', '#statusLabel']
