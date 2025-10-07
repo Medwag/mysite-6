@@ -103,6 +103,8 @@ export async function finalizeSignupFromReference({ reference, membershipTier, p
 
   const profile = await getOrCreateProfile();
   await updateProfile({
+    // keep both keys for backward-compat
+    signUpPaid: true,
     signupPaid: true,
     signupAmount: data.amount / 100,
     signupGateway: 'paystack',

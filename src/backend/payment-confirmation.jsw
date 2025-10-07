@@ -21,6 +21,7 @@ export async function confirmPayment({ gateway, reference, userId }) {
       const result = await verifyPaystackRef(reference);
       if (result.status !== 'success') throw new Error(`Paystack status: ${result.status}`);
       await updateProfileByUserId(result.metadata.userId || userId, {
+        signUpPaid: true,
         signupPaid: true,
         signupAmount: result.amount / 100,
         signupGateway: 'paystack',
@@ -36,6 +37,7 @@ export async function confirmPayment({ gateway, reference, userId }) {
       const pf = await finalizePayFastPayment(reference);
       if (!pf.ok) throw new Error('PayFast finalization failed');
       await updateProfileByUserId(pf.userId || userId, {
+        signUpPaid: true,
         signupPaid: true,
         signupAmount: pf.amount,
         signupGateway: 'payfast',

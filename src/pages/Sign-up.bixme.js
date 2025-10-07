@@ -9,9 +9,9 @@ const CANDIDATES = {
   signup:        ['#openSignUp', '#signup', '#btnSignUp', '#openSignup', '#openSignUpButton'],
   subscribe:     ['#goToSubscriptionButton', '#subscribe', '#btnSubscribe', '#goToPlans', '#choosePlanButton'],
   dashboard:     ['#goToDashboardButton', '#dashboard', '#btnDashboard', '#dashboardButton'],
-  form:          ['#formContainerdata', '#formContainer01', '#formContainer', '#signupForm', '#signupFormContainer'],
-  paystack:      ['#paystackPaymentButton', '#paystackPayButton', '#btnPaystack', '#paystack'],
-  payfast:       ['#payfastPaymentButton', '#payfastPayButton', '#btnPayfast', '#payfast'],
+  form:          ['#formContainer', '#formContainer01', '#signupForm', '#signupFormContainer', '#formContainerdata'],
+  paystack:      ['#paystackPayButton', '#paystackPaymentButton', '#btnPaystack', '#paystack'],
+  payfast:       ['#payfastPayButton', '#payfastPaymentButton', '#btnPayfast', '#payfast'],
   status:        ['#membersStatus', '#statusText', '#status', '#statusLabel']
 };
 

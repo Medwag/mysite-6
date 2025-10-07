@@ -24,8 +24,9 @@ export async function getUserPaymentStatus(userId, email) {
 
     if (profileRes.items.length > 0) {
       const profile = profileRes.items[0];
+      const signupPaid = profile.signUpPaid === true || profile.signupPaid === true;
 
-      if (profile.signUpPaid) {
+      if (signupPaid) {
         status.hasSignUpPaid = true;
         status.signupSource = profile.payFastPaymentId
           ? "PayFast"
