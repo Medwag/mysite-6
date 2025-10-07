@@ -86,7 +86,7 @@ function ensureAddressFieldsEnabled() {
                 // Test responsiveness
                 setTimeout(() => {
                     try {
-                        $w(fieldId).focus();
+                        // focus disabled to avoid cursor hijack
                         console.log(`✅ [CollectAddresses] ${fieldId} is responsive`);
                         
                         // Try to trigger input event to test if it accepts input
@@ -129,7 +129,7 @@ function checkAddressFieldAccessibility() {
     // Test home address field
     if ($w('#homeAddress')) {
         try {
-            $w('#homeAddress').focus();
+            // focus disabled to avoid cursor hijack
             $w('#homeAddress').value = "Test";
             if ($w('#homeAddress').value === "Test") {
                 testResults.homeAddressWorking = true;
@@ -143,7 +143,7 @@ function checkAddressFieldAccessibility() {
     // Test delivery address field
     if ($w('#deliveryAddress')) {
         try {
-            $w('#deliveryAddress').focus();
+            // focus disabled to avoid cursor hijack
             $w('#deliveryAddress').value = "Test";
             if ($w('#deliveryAddress').value === "Test") {
                 testResults.deliveryAddressWorking = true;
@@ -278,7 +278,7 @@ function createBackupAddressInputs() {
                 const activateField = () => {
                     try {
                         $w(fieldId).enable();
-                        $w(fieldId).focus();
+                        // focus disabled to avoid cursor hijack
                         console.log(`⚡ [CollectAddresses] ${fieldName} field activated via events`);
                     } catch (eventErr) {
                         console.log(`⚠️ [CollectAddresses] ${fieldName} event activation failed`);
@@ -313,7 +313,7 @@ function createBackupAddressInputs() {
                     // Method 3: Try to force input acceptance
                     try {
                         // Force focus and input simulation
-                        field.focus();
+                        // focus disabled to avoid cursor hijack
                         
                         // Try to trigger input events to wake up the field
                         if (typeof field.onInput === 'function') {
@@ -390,7 +390,7 @@ function fixHomeAddressFieldSpecifically() {
             setTimeout(() => {
                 try {
                     homeField.enable();
-                    homeField.focus();
+                    // focus disabled to avoid cursor hijack
                     console.log(`✅ [CollectAddresses] Home address enable attempt at ${delay}ms`);
                 } catch (enableErr) {
                     console.log(`⚠️ [CollectAddresses] Home address enable failed at ${delay}ms`);
@@ -406,7 +406,7 @@ function fixHomeAddressFieldSpecifically() {
             console.log('👆 [CollectAddresses] Home address clicked - force enabling...');
             setTimeout(() => {
                 homeField.enable();
-                homeField.focus();
+                // focus disabled to avoid cursor hijack
             }, 10);
         });
         
@@ -424,7 +424,7 @@ function fixHomeAddressFieldSpecifically() {
         setTimeout(() => {
             console.log('🧪 [CollectAddresses] Testing home address field after fixes...');
             try {
-                homeField.focus();
+                // focus disabled to avoid cursor hijack
                 homeField.value = 'TEST';
                 if (homeField.value === 'TEST') {
                     console.log('✅ [CollectAddresses] Home address field TEST SUCCESSFUL!');
@@ -553,7 +553,7 @@ $w.onReady(async () => {
                     setTimeout(() => {
                         try {
                             $w('#homeAddress').enable();
-                            $w('#homeAddress').focus();
+                            // focus disabled to avoid cursor hijack
                             console.log(`✅ [CollectAddresses] Home address enable attempt ${i + 1}`);
                         } catch (err) {
                             console.log(`⚠️ [CollectAddresses] Home address enable attempt ${i + 1} failed`);
@@ -688,7 +688,7 @@ $w.onReady(async () => {
                             setTimeout(() => {
                                 try {
                                     $w(fieldId).enable();
-                                    $w(fieldId).focus();
+                                     // focus disabled to avoid cursor hijack
                                 } catch (interactionErr) {
                                     console.warn(`⚠️ [CollectAddresses] Could not enable ${fieldName} field on interaction:`, interactionErr);
                                 }
