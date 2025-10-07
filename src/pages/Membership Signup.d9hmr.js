@@ -7,7 +7,7 @@ import wixLocation from 'wix-location';
 import wixData from 'wix-data';
 
 import { getUserPaymentStatus } from 'backend/status.jsw';
-import { PaymentService } from 'backend/core/payment-service.jsw';
+import { detectSignupPayment, detectActiveSubscription } from 'backend/core/payment-service.jsw';
 import { getEmergencyProfile, updateEmergencyProfile } from 'backend/core/profile-service.jsw';
 import { sendDiscordLog } from 'backend/logger.jsw';
 
@@ -61,7 +61,7 @@ async function ensureCmsFromDetection(userId, email, detection) {
 }
 
 async function detectSignup(userId, email) {
-  const detection = await PaymentService.detectSignupPayment(userId, email).catch((e) => ({ success:false, error:e?.message }));
+  const detection = await detectSignupPayment(userId, email).catch((e) => ({ success:false, error:e?.message }));
   await log('🔎 detectSignup result', detection);
   await ensureCmsFromDetection(userId, email, detection);
   return detection;
@@ -217,4 +217,3 @@ $w.onReady(async () => {
 
   await log('✅ membersignup: initialized');
 });
-

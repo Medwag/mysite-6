@@ -171,6 +171,15 @@ export class PaymentService {
   }
 }
 
+// Web module wrappers for frontend consumption
+export async function detectSignupPayment(userId, email, reference = null, provider = null) {
+  return PaymentService.detectSignupPayment(userId, email, reference, provider);
+}
+
+export async function detectActiveSubscription(userId, email) {
+  return PaymentService.detectActiveSubscription(userId, email);
+}
+
 export async function detectSignupPayment(...args) { return PaymentService.detectSignupPayment(...args); }
 export async function detectActiveSubscription(...args) { return PaymentService.detectActiveSubscription(...args); }
 export async function syncPaymentStatus(...args) { return PaymentService.syncPaymentStatus(...args); }

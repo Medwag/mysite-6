@@ -436,6 +436,7 @@ function determinePlanAssignment(subscription, signupPaymentStatus = null) {
     }
 }
     
+    function inferTierFromSubscription(subscription) {
     const assignment = {
         tier: 'Free',
         confidence: 'low',
