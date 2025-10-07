@@ -40,7 +40,15 @@ const fmtMoney = (n) => `R ${Number(n || 0).toFixed(2)}`;
 const fmtDate = (d) => { try { return new Date(d).toLocaleDateString(); } catch { return ''; } };
 
 // UX preference: when signup is unpaid, either hide SubscribeLink or show a disabled informative message
-const HIDE_SUBSCRIBE_WHEN_UNPAID = true; // set to false to keep it visible but disabled with a helpful label
+
+// Helper: open the signup lightbox using the new name, fallback to old name
+async function openSignupLightbox() {
+  try {
+    await wixWindow.openLightbox('CollectAddresses');
+  } catch (e) {
+    try { await wixWindow.openLightbox('CollectAddresses1'); } catch (_) {}
+  }
+} // set to false to keep it visible but disabled with a helpful label
 
 async function ensureCmsFromDetection(userId, email, detection) {
   if (!detection?.paymentDetected) return;
@@ -176,12 +184,12 @@ $w.onReady(async () => {
   if (!signupPaid) {
     if (elSignUpLink) {
       safeLabel(elSignUpLink, 'Complete Sign Up'); safeShow(elSignUpLink); safeDisable(elSignUpLink, false);
-      safeOnClick(elSignUpLink, () => wixWindow.openLightbox('CollectAddresses1'));
+      safeOnClick(elSignUpLink, () => openSignupLightbox());
       await log('🔗 signUpLink enabled for unpaid');
     }
     if (elPaySignup) {
       safeLabel(elPaySignup, 'Pay Sign Up Fee'); safeShow(elPaySignup); safeDisable(elPaySignup, false);
-      safeOnClick(elPaySignup, () => wixWindow.openLightbox('CollectAddresses1'));
+      safeOnClick(elPaySignup, () => openSignupLightbox());
       await log('🔘 paySignup enabled for unpaid');
     }
   } else {
@@ -247,3 +255,4 @@ $w.onReady(async () => {
 
   await log('✅ membersignup: initialized');
 });
+

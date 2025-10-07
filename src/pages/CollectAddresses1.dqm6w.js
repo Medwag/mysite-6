@@ -483,6 +483,10 @@ $w.onReady(async () => {
     setTimeout(() => {
         enableAddressFieldsAggressively();
     }, 100);
+    // Hide the status banner shortly after enabling to avoid blocking clicks
+    setTimeout(() => {
+        try { $w('#errorText').hide(); } catch {}
+    }, 700);
     
     setTimeout(() => {
         createBackupAddressInputs();
