@@ -17,10 +17,37 @@ const CANDIDATES = {
 
 /* ---------- tiny helpers ---------- */
 const tryGet = (sel) => {
-  try { const el = $w(sel); /* will throw if not found */ el.id; return el; } catch { return null; }
+  try { const el = $w(sel); el.id; return el; } catch { return null; }
 };
+
+// Resolve by direct ID first, then scan all elements for case-insensitive/partial ID matches
 const pick = (list) => {
-  for (const s of list) { const el = tryGet(s); if (el) return { el, sel: s }; }
+  // 1) direct attempts with provided selectors
+  for (const s of list) {
+    const el = tryGet(s);
+    if (el) return { el, sel: s };
+  }
+  // 2) fallback: scan $w('*') for ids that equal or include any candidate (case-insensitive)
+  try {
+    const all = $w('*');
+    const norm = (x) => String(x || '').replace(/^#/,'').toLowerCase();
+    const candidates = list.map(norm);
+    for (const el of all) {
+      try {
+        const id = norm(el.id);
+        if (!id) continue;
+        // exact first
+        if (candidates.some(c => id === c)) return { el, sel: `#${el.id}` };
+      } catch {}
+    }
+    for (const el of all) {
+      try {
+        const id = norm(el.id);
+        if (!id) continue;
+        if (candidates.some(c => id.includes(c))) return { el, sel: `#${el.id}` };
+      } catch {}
+    }
+  } catch {}
   return { el: null, sel: null };
 };
 const safeShow = (el) => { try { el.show(); } catch {} };
