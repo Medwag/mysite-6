@@ -39,6 +39,9 @@ const greet = () => { const h = new Date().getHours(); return h < 12 ? 'Good Mor
 const fmtMoney = (n) => `R ${Number(n || 0).toFixed(2)}`;
 const fmtDate = (d) => { try { return new Date(d).toLocaleDateString(); } catch { return ''; } };
 
+// UX preference: when signup is unpaid, either hide SubscribeLink or show a disabled informative message
+const HIDE_SUBSCRIBE_WHEN_UNPAID = true; // set to false to keep it visible but disabled with a helpful label
+
 async function ensureCmsFromDetection(userId, email, detection) {
   if (!detection?.paymentDetected) return;
   try {
@@ -137,6 +140,7 @@ $w.onReady(async () => {
   const elAccordionPlans = getEl('accordionItem7');
   const elBilling = getEl('billingCycleDropdown');
   const elSubscribeBtn = getEl('subscribe');
+  const elSubscribeInfo = getEl('subscribeInfo');
 
   // User context
   const user = wixUsers.currentUser;
@@ -192,11 +196,25 @@ $w.onReady(async () => {
   // Subscribe links/buttons
   if (elSubscribeLink) {
     if (signupPaid && !hasSub) {
-      safeLabel(elSubscribeLink, 'Subscribe to a Plan'); safeShow(elSubscribeLink);
+      safeLabel(elSubscribeLink, 'Subscribe to a Plan');
+      safeShow(elSubscribeLink);
+      safeDisable(elSubscribeLink, false);
       safeOnClick(elSubscribeLink, async () => { if (elAccordionPlans) await safeExpand(elAccordionPlans); });
+      await log('🟢 SubscribeLink enabled (signup paid, no subscription)');
     } else if (!signupPaid) {
-      safeLabel(elSubscribeLink, 'Please sign up'); safeShow(elSubscribeLink); safeDisable(elSubscribeLink, true);
-    } else { safeHide(elSubscribeLink); }
+      if (HIDE_SUBSCRIBE_WHEN_UNPAID) {
+        safeHide(elSubscribeLink);
+        await log('🔒 SubscribeLink hidden (signup unpaid)');
+      } else {
+        safeLabel(elSubscribeLink, 'Please pay the sign-up fee before selecting a subscription plan');
+        safeShow(elSubscribeLink);
+        safeDisable(elSubscribeLink, true);
+        await log('🔒 SubscribeLink disabled with unpaid notice');
+      }
+    } else {
+      // signupPaid && hasSub
+      safeHide(elSubscribeLink);
+    }
   }
 
   if (elSubscribeBtn) {
@@ -208,6 +226,18 @@ $w.onReady(async () => {
   if (elVisitDash) {
     if (hasSub) { safeShow(elVisitDash); safeOnClick(elVisitDash, () => wixLocation.to('/dashboard')); }
     else { safeHide(elVisitDash); }
+  }
+
+  // Informative subscription message (best practice): guide when signup unpaid
+  if (elSubscribeInfo) {
+    if (!signupPaid) {
+      safeText(elSubscribeInfo, 'Complete your once-off sign-up payment to choose a plan.');
+      safeShow(elSubscribeInfo);
+      // Make it actionable: open the data collection lightbox
+      safeOnClick(elSubscribeInfo, () => wixWindow.openLightbox('CollectAddresses1'));
+    } else {
+      safeHide(elSubscribeInfo);
+    }
   }
 
   // Plans

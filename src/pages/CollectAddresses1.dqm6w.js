@@ -424,18 +424,37 @@ function fixHomeAddressFieldSpecifically() {
     }
 }
 
-$w.onReady(() => {
+$w.onReady(async () => {
     console.log('🏠 [CollectAddresses] Lightbox initializing...');
     
-    $w('#errorText').hide();
-    $w('#loadingSpinner').hide(); // Make sure you have a #loadingSpinner element (e.g., an animated GIF or box)
+    try { $w('#errorText').hide(); } catch {}
+    try { $w('#loadingSpinner').hide(); } catch {}
+
+    // Prefill known user/profile data for accuracy
+    try {
+        const user = wixUsers.currentUser;
+        if (user?.loggedIn) {
+            const emailVal = await user.getEmail().catch(() => '');
+            try { if (emailVal && $w('#inputEmail')) $w('#inputEmail').value = emailVal; } catch {}
+            try {
+                const { getEmergencyProfile } = await import('backend/core/profile-service.jsw');
+                const prof = await getEmergencyProfile(user.id).catch(() => null);
+                if (prof) {
+                    if (prof.fullName && $w('#inputFullName')) $w('#inputFullName').value = prof.fullName;
+                    if (prof.phone && $w('#inputPhone')) $w('#inputPhone').value = prof.phone;
+                    if (prof.whatsAppNumber && $w('#inputWA')) $w('#inputWA').value = prof.whatsAppNumber;
+                    if (prof.homeAddress && $w('#homeAddress')) try { $w('#homeAddress').value = prof.homeAddress; } catch {}
+                    if (prof.deliveryAddress && $w('#deliveryAddress')) try { $w('#deliveryAddress').value = prof.deliveryAddress; } catch {}
+                }
+            } catch {}
+        }
+    } catch {}
     
     // 🚀 IMMEDIATE ULTRA-AGGRESSIVE FIELD PREPARATION
     console.log('🚀 [CollectAddresses] Pre-emptive address field optimization starting...');
     
     // Show immediate user feedback
-    $w('#errorText').text = '🔄 Preparing address input fields...';
-    $w('#errorText').show();
+    try { $w('#errorText').text = 'Preparing address input fields...'; $w('#errorText').show(); } catch {}
     
     // SPECIAL TREATMENT FOR HOME ADDRESS FIELD (known problematic)
     setTimeout(() => {
@@ -798,6 +817,7 @@ $w.onReady(() => {
         }, 50);
     });
 });
+
 
 
 
