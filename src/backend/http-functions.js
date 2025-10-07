@@ -3,6 +3,7 @@ import wixSecretsBackend from 'wix-secrets-backend';
 import { ok, serverError, badRequest, response } from 'wix-http-functions';
 import { fetch } from 'wix-fetch';
 import { sendDiscordLog } from 'backend/logger.jsw';
+import { setSignupPaid } from 'backend/core/signup-utils.jsw';
 import { getPayFastConfig } from 'backend/payfast-config.jsw';
 // Lint guard: optional handler referenced behind typeof
 const handleFirstPaymentSuccess = undefined;
@@ -49,10 +50,9 @@ async function markSignUpPaid(userId, paymentId) {
     const profile = profileQuery.items[0];
     if (!profile) return null;
 
-    profile.signUpPaid = true;
-    profile.lastPaymentDate = new Date();
+    // Normalize flags via helper and persist raw PayFast id for traceability
+    await setSignupPaid(userId, { reference: paymentId, gateway: 'payfast' });
     profile.payFastPaymentId = paymentId;
-
     return wixData.update('Emergency_Profiles', profile, { suppressAuth: true });
   } catch (err) {
     console.error('❌ markSignUpPaid error:', err);

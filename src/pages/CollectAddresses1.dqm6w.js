@@ -782,12 +782,7 @@ $w.onReady(async () => {
             console.log('✅ Profile saved:', savedProfile);
 
             // --- Close this lightbox and open payment method selector ---
-            wixWindow.lightbox.close({ 
-                profileSaved: true, 
-                profileId: savedProfile._id,
-                userId: user.id,
-                email: email
-            });
+            (async () => { try { await wixWindow.openLightbox('PaymentMethodSelector', { profileSaved: true, profileId: savedProfile?._id, userId: user.id, fullName, email, phoneNumber: phone, signUpPhoneNumber: phone, homeAddress, deliveryAddress }); } catch(e) { console.warn('PaymentMethodSelector open failed:', e?.message || e); } wixWindow.lightbox.close({ profileSaved: true, profileId: savedProfile?._id, userId: user.id, email }); })();
 
         } catch (err) {
             console.error('❌ CollectAddresses error:', err);
@@ -848,6 +843,7 @@ $w.onReady(async () => {
         }, 50);
     });
 });
+
 
 
 

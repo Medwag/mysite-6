@@ -1,11 +1,13 @@
+/* global wixWindow, wixLocation */
 // pages/PaymentMethodSelector.js
 // ✅ PRODUCTION READY: Payment Method Selection Lightbox
 // Gives users choice between Paystack and PayFast for R149.00 signup
 
 import { getPaymentMethods, createSignupPaymentWithGateway, getRecommendedPaymentMethod } from 'backend/core/dual-payment-gateway.jsw';
 import wixUsers from 'wix-users';
-import wixWindow from 'wix-window';
 import wixLocation from 'wix-location';
+import { createPaystackPayment } from 'backend/paystack.jsw';
+import { createPayfastPayment } from 'backend/payfast.jsw';
 
 let selectedGateway = null;
 let paymentMethods = [];
@@ -452,3 +454,9 @@ export function selectPayfast() {
         selectPaymentMethod('payfast', payfastMethod);
     }
 }
+
+
+
+
+
+

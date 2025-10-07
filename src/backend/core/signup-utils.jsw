@@ -1,0 +1,27 @@
+import { updateEmergencyProfile } from 'backend/core/profile-service.jsw';
+
+/**
+ * Normalize signup paid fields and audit associated data
+ * @param {string} userId
+ * @param {{ reference?: string, amount?: number, gateway?: string, date?: Date }} opts
+ */
+export async function setSignupPaid(userId, opts = {}) {
+  const when = opts.date || new Date();
+  const updates = {
+    signUpPaid: true,
+    signupPaid: true,
+    signUpReference: opts.reference,
+    signupGateway: opts.gateway,
+    signupAmount: typeof opts.amount === 'number' ? opts.amount : undefined,
+    lastPaymentDate: when
+  };
+  return updateEmergencyProfile(userId, updates);
+}
+
+/**
+ * Determine if profile indicates signup paid (compat across flags)
+ */
+export function isSignupPaid(profile) {
+  return profile?.signUpPaid === true || profile?.signupPaid === true;
+}
+

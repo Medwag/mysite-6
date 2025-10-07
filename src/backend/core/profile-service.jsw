@@ -1,12 +1,12 @@
-// backend/core/profile-service.jsw
-// ✅ PRODUCTION CRITICAL: Consolidated Profile Management Service
+﻿// backend/core/profile-service.jsw
+// âœ… PRODUCTION CRITICAL: Consolidated Profile Management Service
 // This ensures reliable profile creation and state management
 
 import wixData from 'wix-data';
 import wixUsersBackend from 'wix-users-backend';
 
 /**
- * ✅ PRODUCTION CRITICAL: Single source of truth for profile management
+ * âœ… PRODUCTION CRITICAL: Single source of truth for profile management
  * Ensures consistent profile handling across the entire system
  */
 export class ProfileService {
@@ -17,7 +17,7 @@ export class ProfileService {
      * @returns {Promise<object>} Profile object
      */
     static async getOrCreateProfile(userId) {
-        console.log(`[ProfileService] 🔍 Getting/creating profile for user: ${userId}`);
+        console.log(`[ProfileService] ðŸ” Getting/creating profile for user: ${userId}`);
         
         try {
             // Step 1: Try to find existing profile
@@ -28,7 +28,7 @@ export class ProfileService {
 
             if (existingQuery.items.length > 0) {
                 const profile = existingQuery.items[0];
-                console.log(`✅ [ProfileService] Found existing profile: ${profile._id}`);
+                console.log(`âœ… [ProfileService] Found existing profile: ${profile._id}`);
                 return profile;
             }
 
@@ -70,12 +70,12 @@ export class ProfileService {
             };
 
             const createdProfile = await wixData.insert('Emergency_Profiles', newProfile, { suppressAuth: true });
-            console.log(`✅ [ProfileService] Created new profile: ${createdProfile._id}`);
+            console.log(`âœ… [ProfileService] Created new profile: ${createdProfile._id}`);
             
             return createdProfile;
 
         } catch (error) {
-            console.error(`❌ [ProfileService] Profile creation/retrieval error:`, error);
+            console.error(`âŒ [ProfileService] Profile creation/retrieval error:`, error);
             throw new Error(`Profile service error: ${error.message}`);
         }
     }
@@ -87,7 +87,7 @@ export class ProfileService {
      * @returns {Promise<object>} Updated profile
      */
     static async updateProfile(userId, updates) {
-        console.log(`[ProfileService] 📝 Updating profile for user: ${userId}`);
+        console.log(`[ProfileService] ðŸ“ Updating profile for user: ${userId}`);
         
         try {
             // Get existing profile
@@ -122,12 +122,12 @@ export class ProfileService {
             });
 
             const updatedProfile = await wixData.update('Emergency_Profiles', updateData, { suppressAuth: true });
-            console.log(`✅ [ProfileService] Updated profile: ${updatedProfile._id}`);
+            console.log(`âœ… [ProfileService] Updated profile: ${updatedProfile._id}`);
             
             return updatedProfile;
 
         } catch (error) {
-            console.error(`❌ [ProfileService] Profile update error:`, error);
+            console.error(`âŒ [ProfileService] Profile update error:`, error);
             throw new Error(`Profile update failed: ${error.message}`);
         }
     }
@@ -147,7 +147,7 @@ export class ProfileService {
             return query.items.length > 0 ? query.items[0] : null;
 
         } catch (error) {
-            console.error(`❌ [ProfileService] Get profile error:`, error);
+            console.error(`âŒ [ProfileService] Get profile error:`, error);
             return null;
         }
     }
@@ -167,7 +167,7 @@ export class ProfileService {
             return query.items.length > 0 ? query.items[0] : null;
 
         } catch (error) {
-            console.error(`❌ [ProfileService] Get profile by public ID error:`, error);
+            console.error(`âŒ [ProfileService] Get profile by public ID error:`, error);
             return null;
         }
     }
@@ -268,3 +268,4 @@ export function getUserState(profile) {
 export function getEmergencyProfileUrl(profile) {
     return ProfileService.getEmergencyProfileUrl(profile);
 }
+
