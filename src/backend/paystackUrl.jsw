@@ -1,7 +1,7 @@
 // backend/paystackUrl.jsw
 // Unified Paystack Signup Payment Generator for EmergiTag
 
-import { getPaystackSecretKey } from 'backend/core/paystack-config.jsw';
+import { getPaystackSecretKey } from 'backend/paystack-config.jsw';
 import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
 import { sendDiscordAlert } from 'backend/discord-utils.jsw';

@@ -22,6 +22,8 @@ import wixWindow from 'wix-window';
 import wixUsers from 'wix-users';
 import wixLocation from 'wix-location';
 import { saveEmergencyProfile, EmergencyProfile } from 'backend/profile-utils.jsw';
+import { createSignupPaymentUrl } from 'backend/paystackUrl.jsw';
+import { generatePayFastUrl } from 'backend/payfastUrl.jsw';
 
 function formatPhone(input) {
     if (!input) return null;
@@ -42,6 +44,69 @@ function getFormattedAddress(value) {
     
     return formatted;
 }
+
+function debugCAActive() {
+    try {
+        const q = (wixLocation && wixLocation.query) ? wixLocation.query : {};
+        if (typeof q.debugCA === 'undefined') return false;
+        const v = String(q.debugCA).toLowerCase();
+        return (v !== '0' && v !== 'false' && v !== 'no');
+    } catch (_) { return false; }
+}
+
+// Throttle/gate CollectAddresses logs to prevent Wix Log spam
+(() => {
+  try {
+    // Enable verbose logs via URL: ?debugCA=1 (disable with 0/false)
+    let verboseFromQuery = false;
+    try {
+      const q = (wixLocation && wixLocation.query) ? wixLocation.query : {};
+      if (typeof q.debugCA !== 'undefined') {
+        const v = String(q.debugCA).toLowerCase();
+        verboseFromQuery = (v !== '0' && v !== 'false' && v !== 'no');
+      }
+    } catch (_) {}
+
+    const VERBOSE_COLLECT_LOGS = !!verboseFromQuery; // set true only when debugging
+    const RATE_LIMIT_MS = 60000; // per unique message per 60s
+    const lastSeen = new Map();
+    const origLog = console.log.bind(console);
+    const origWarn = console.warn.bind(console);
+    const origError = console.error.bind(console);
+
+    function shouldEmit(tag, msg) {
+      if (typeof msg !== 'string' || !msg.includes('[CollectAddresses]')) return true;
+      if (!VERBOSE_COLLECT_LOGS && (tag === 'log' || tag === 'warn')) return false; // drop info/warn by default
+      const key = tag + ':' + msg;
+      const now = Date.now();
+      const last = lastSeen.get(key) || 0;
+      if (now - last < RATE_LIMIT_MS) return false;
+      lastSeen.set(key, now);
+      return true;
+    }
+
+    console.log = (first, ...rest) => {
+      try { if (!shouldEmit('log', first)) return; } catch (_) {}
+      origLog(first, ...rest);
+    };
+    console.warn = (first, ...rest) => {
+      try { if (!shouldEmit('warn', first)) return; } catch (_) {}
+      origWarn(first, ...rest);
+    };
+    console.error = (first, ...rest) => {
+      try {
+        if (typeof first === 'string' && first.includes('[CollectAddresses]')) {
+          const key = 'err:' + first;
+          const now = Date.now();
+          const last = lastSeen.get(key) || 0;
+          if (now - last < RATE_LIMIT_MS) return;
+          lastSeen.set(key, now);
+        }
+      } catch (_) {}
+      origError(first, ...rest);
+    };
+  } catch (_) {}
+})();
 
 // Helper function to ensure address fields are working properly
 function ensureAddressFieldsEnabled() {
@@ -849,4 +914,78 @@ $w.onReady(async () => {
 
 
 
+
+
+
+// --- Integrated payment (Paystack/PayFast) moved into CollectAddresses ---
+$w.onReady(async () => {
+  // Safely collapse info containers
+  try { if ($w('#PaystackDetails').collapse) $w('#PaystackDetails').collapse(); else $w('#PaystackDetails').hide(); } catch(_){}
+  try { if ($w('#PayfastDetails').collapse) $w('#PayfastDetails').collapse(); else $w('#PayfastDetails').hide(); } catch(_){}
+
+  // Hover tooltips
+  try {
+    $w('#PaystackPay').onMouseIn(() => { try { $w('#PayfastDetails').hide('slide',{direction:'top',duration:150}); } catch(_){}; try { $w('#PaystackDetails').show('slide',{direction:'top',duration:200}); } catch(_){} });
+    $w('#PaystackPay').onMouseOut(() => { try { $w('#PaystackDetails').hide('slide',{direction:'top',duration:150}); } catch(_){} });
+  } catch(_){}
+  try {
+    $w('#PayfastPay').onMouseIn(() => { try { $w('#PaystackDetails').hide('slide',{direction:'top',duration:150}); } catch(_){}; try { $w('#PayfastDetails').show('slide',{direction:'top',duration:200}); } catch(_){} });
+    $w('#PayfastPay').onMouseOut(() => { try { $w('#PayfastDetails').hide('slide',{direction:'top',duration:150}); } catch(_){} });
+  } catch(_){}
+
+  async function collectSubscriber() {
+    const user = wixUsers.currentUser;
+    let email = '';
+    try { email = await user.getEmail(); } catch {}
+    let profile = null;
+    try { const { getEmergencyProfile } = await import('backend/core/profile-service.jsw'); profile = await getEmergencyProfile(user.id).catch(() => null); } catch(_){ }
+    const fullName = profile?.fullName || ($w('#inputFullName')?.value || '').trim();
+    const phone = profile?.phone || ($w('#inputPhone')?.value || '').trim();
+    const wa = profile?.whatsAppNumber || ($w('#inputWA')?.value || '').trim();
+    const home = profile?.homeAddress || ($w('#homeAddress')?.value || '');
+    const delivery = profile?.deliveryAddress || ($w('#deliveryAddress')?.value || '');
+    try { $w('#SubscriberName').text = fullName || ''; $w('#SubscriberName').show(); } catch{}
+    try { $w('#SubscriberEmail').text = email || ''; $w('#SubscriberEmail').show(); } catch{}
+    try { $w('#SubscriberPhoneNumber').text = (phone || wa || ''); $w('#SubscriberPhoneNumber').show(); } catch{}
+    try { $w('#SubscriberHomeAddress').text = String(home || ''); $w('#SubscriberHomeAddress').show(); } catch{}
+    try { $w('#SubscriberDeliveryAddress').text = String(delivery || ''); $w('#SubscriberDeliveryAddress').show(); } catch{}
+    return { userId: user.id, email, fullName, phone: (phone || wa), homeAddress: home, deliveryAddress: delivery };
+  }
+
+  async function ensureSaved(sub){
+    try { await saveEmergencyProfile({ userId: sub.userId, email: sub.email, fullName: sub.fullName, phone: sub.phone, homeAddress: sub.homeAddress, deliveryAddress: sub.deliveryAddress, fullNameInput: sub.fullName, signUpPhoneNumber: sub.phone, address1Input: sub.homeAddress }); } catch(_){ }
+  }
+
+  let paying = false;
+  async function startPaystack(){
+    if (paying) return; paying = true;
+    try { $w('#errorText').hide(); } catch{}
+    try { $w('#PaystackPay').disable(); } catch{}
+    try { $w('#PayfastPay').disable(); } catch{}
+    try { $w('#loadingSpinner').show(); } catch{}
+    const sub = await collectSubscriber();
+    await ensureSaved(sub);
+    const ref = `EMERGI-SIGNUP-PS-${sub.userId}-${Date.now()}`;
+    const channels = ['card','bank','apple_pay','qr','mobile_money','eft','payattitude'];
+    const url = await createSignupPaymentUrl(sub.userId, sub.email, { currency: 'ZAR', channels, reference: ref, callback_url: 'https://www.emergitag.me/signup-success', metaExtra: { subscriberName: sub.fullName, subscriberEmail: sub.email, subscriberPhoneNumber: sub.phone, subscriberHomeAddress: sub.homeAddress, subscriberDeliveryAddress: sub.deliveryAddress } });
+    if (!url) { try { $w('#errorText').text = 'Could not create Paystack payment'; $w('#errorText').show(); } catch{}; try { $w('#PaystackPay').enable(); } catch{}; try { $w('#PayfastPay').enable(); } catch{}; try { $w('#loadingSpinner').hide(); } catch{}; paying=false; return; }
+    wixLocation.to(url);
+  }
+
+  async function startPayfast(){
+    if (paying) return; paying = true;
+    try { $w('#errorText').hide(); } catch{}
+    try { $w('#PayfastPay').disable(); } catch{}
+    try { $w('#PaystackPay').disable(); } catch{}
+    try { $w('#loadingSpinner').show(); } catch{}
+    const sub = await collectSubscriber();
+    await ensureSaved(sub);
+    const url = await generatePayFastUrl(sub.userId, 149.00);
+    if (!url) { try { $w('#errorText').text = 'Could not create PayFast payment'; $w('#errorText').show(); } catch{}; try { $w('#PayfastPay').enable(); } catch{}; try { $w('#PaystackPay').enable(); } catch{}; try { $w('#loadingSpinner').hide(); } catch{}; paying=false; return; }
+    wixLocation.to(url);
+  }
+
+  try { $w('#PaystackPay').onClick(() => startPaystack()); } catch{}
+  try { $w('#PayfastPay').onClick(() => startPayfast()); } catch{}
+});
 
