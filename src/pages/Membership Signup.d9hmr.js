@@ -1,93 +1,37 @@
-// membersignup page logic
-  const hasMembershipTierSelected = !!(agg?.hasMembershipTierSelected);
-  const membershipTier = agg?.membershipTier || \"\";
-// Adds greeting, email display, signup/subscription gating, and plan rendering with logging
-
+// membersignup page logic (clean implementation)
 import wixUsers from 'wix-users';
 import wixWindow from 'wix-window';
 import wixLocation from 'wix-location';
 import wixData from 'wix-data';
 
 import { getUserPaymentStatus } from 'backend/status.jsw';
-import { detectSignupPayment, detectActiveSubscription } from 'backend/core/payment-service.jsw';
+import { detectSignupPayment } from 'backend/core/payment-service.jsw';
 import { getEmergencyProfile, updateEmergencyProfile } from 'backend/core/profile-service.jsw';
 import { setSignupPaid } from 'backend/core/signup-utils.jsw';
-import { sendDiscordLog } from 'backend/logger.jsw';
 
-const log = async (m, extra = null) => {
-  try { console.log(m, extra ?? ''); await sendDiscordLog(m + (extra ? ` ${JSON.stringify(extra)}` : '')); } catch (_) {}
+// Helpers
+const greet = () => {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good Morning' : h < 17 ? 'Good Afternoon' : 'Good Evening';
+};
+const money = (n) => `R ${Number(n || 0).toFixed(2)}`;
+const dateStr = (d) => { try { return new Date(d).toLocaleDateString(); } catch { return ''; } };
+const show = (el) => { try { el.show(); } catch(_){} };
+const hide = (el) => { try { el.hide(); } catch(_){} };
+const setText = (el, t) => { try { el.text = String(t); } catch(_){} };
+const setLabel = (el, t) => { try { el.label = String(t); } catch(_) { setText(el, t); } };
+const setEnabled = (el, enabled) => { try { el.enabled = !!enabled; } catch(_){} };
+const onClick = (el, fn) => { try { el.onClick(fn); } catch(_){} };
+const expandOrShow = async (el) => {
+  try { if (el.expand) { await el.expand(); } else { await el.show(); } } catch { try { await el.show(); } catch(_){} }
 };
 
-const tryGet = (sel) => { try { const el = $w(sel); el.id; return el; } catch (_) { return null; } };
-const getEl = (id, alts = []) => {
-  const candidates = ['#' + id.replace(/^#/, '')].concat(alts.map(a => '#' + a.replace(/^#/, '')));
-  for (const c of candidates) { const el = tryGet(c); if (el) return el; }
-  try {
-    const wanted = candidates.map(s => s.replace(/^#/, '').toLowerCase());
-    const all = $w('*');
-    for (const el of all) { try { const nid = (el.id || '').toLowerCase(); if (wanted.includes(nid)) return el; } catch(_){} }
-    for (const el of all) { try { const nid = (el.id || '').toLowerCase(); if (wanted.some(w => nid.includes(w))) return el; } catch(_){} }
-  } catch(_){}
-  return null;
-};
-const safeShow = (el) => { try { el.show(); } catch (_) {} };
-const safeHide = (el) => { try { el.hide(); } catch (_) {} };
-const safeText = (el, t) => { try { el.text = String(t); } catch (_) {} };
-const safeLabel = (el, t) => { try { el.label = String(t); } catch (_) { safeText(el, t); } };
-const safeDisable = (el, v=true) => { try { el.enabled = !v; } catch (_) {} };
-const safeOnClick = (el, fn) => { try { el.onClick(fn); } catch (_) {} };
-const safeExpand = async (el) => { try { if (el.expand) await el.expand(); else await el.show(); } catch (_) { try { await el.show(); } catch {} } };
-
-const greet = () => { const h = new Date().getHours(); return h < 12 ? 'Good Morning' : (h < 17 ? 'Good Afternoon' : 'Good Evening'); };
-const fmtMoney = (n) => `R ${Number(n || 0).toFixed(2)}`;
-const fmtDate = (d) => { try { return new Date(d).toLocaleDateString(); } catch { return ''; } };
-
-// UX preference: when signup is unpaid, either hide SubscribeLink or show a disabled informative message
-const HIDE_SUBSCRIBE_WHEN_UNPAID = true;
-
-
-// UX preference: when signup is unpaid, either hide SubscribeLink or show a disabled informative message
-
-// Helper: open the signup lightbox using the new name, fallback to old name
-async function openSignupLightbox() {
-  try {
-    await wixWindow.openLightbox('CollectAddresses');
-  } catch (e) {
-    try { await wixWindow.openLightbox('CollectAddresses1'); } catch (_) {}
-  }
-} // set to false to keep it visible but disabled with a helpful label
-
-async function ensureCmsFromDetection(userId, email, detection) {
-  if (!detection?.paymentDetected) return;
-  try {
-    const profile = await getEmergencyProfile(userId).catch(() => null);
-    const already = profile?.signUpPaid === true || profile?.signupPaid === true;
-    if (already) { await log('ℹ️ CMS already marked signUpPaid'); return; }
-    const updates = {
-      signUpPaid: true,
-      signupPaid: true,
-      signUpReference: detection.reference || profile?.signUpReference || null,
-      signupGateway: detection.provider || profile?.signupGateway || null,
-      signupAmount: detection.amount || profile?.signupAmount || 150,
-      lastPaymentDate: detection.paymentDate ? new Date(detection.paymentDate) : new Date()
-    };
-    await updateEmergencyProfile(userId, updates);
-    await log('✅ CMS updated from detection', updates);
-  } catch (e) {
-    await log('❌ ensureCmsFromDetection failed', { error: e?.message || String(e) });
-  }
+async function openSignup() {
+  try { await wixWindow.openLightbox('CollectAddresses1'); }
+  catch { try { await wixWindow.openLightbox('CollectAddresses'); } catch(_){} }
 }
 
-async function detectSignup(userId, email) {
-  const detection = await detectSignupPayment(userId, email).catch((e) => ({ success:false, error:e?.message }));
-  await log('🔎 detectSignup result', detection);
-  try { await ensureCmsFromDetectionNormalized(userId, email, detection); } catch(_) {}
-  await ensureCmsFromDetection(userId, email, detection);
-  return detection;
-}
-
-// Use normalization helper to set consistent signup flags and audit fields
-async function ensureCmsFromDetectionNormalized(userId, email, detection) {
+async function ensureCmsSignup(userId, detection) {
   if (!detection?.paymentDetected) return;
   const opts = {
     reference: detection.reference,
@@ -95,191 +39,176 @@ async function ensureCmsFromDetectionNormalized(userId, email, detection) {
     amount: detection.amount,
     date: detection.paymentDate ? new Date(detection.paymentDate) : new Date()
   };
-  await setSignupPaid(userId, opts);
-  await log('dY"S normalized signup flags via helper', opts);
-}
-
-async function findPlansRepeater() {
   try {
-    const all = $w('*');
-    for (const el of all) {
-      try { if (typeof el.onItemReady === 'function' && typeof el.forEachItem === 'function') return el; } catch(_){}
-    }
-  } catch(_){}
-  return null;
+    await setSignupPaid(userId, opts);
+  } catch(_) {
+    // Fallback direct update
+    const updates = {
+      signUpPaid: true,
+      signupPaid: true,
+      signUpReference: detection.reference,
+      signupGateway: detection.provider,
+      signupAmount: detection.amount,
+      lastPaymentDate: opts.date
+    };
+    try { await updateEmergencyProfile(userId, updates); } catch(_){}
+  }
 }
 
 async function renderPlans(cycle) {
-  const repeater = await findPlansRepeater();
-  if (!repeater) { await log('⚠️ No repeater found for plans'); return; }
+  // Expect a repeater with id `#planRepeater` and elements as described
+  const repeater = $w('#planRepeater');
+  if (!repeater) return;
 
-  const res = await wixData.query('PlanOptions').ascending('sortOrder').find().catch((e) => ({ items: [], error:e?.message }));
-  if (!res.items) { await log('❌ PlanOptions query failed', res); return; }
+  const results = await wixData.query('PlanOptions')
+    .ascending('sortOrder')
+    .find();
 
-  const useAnnual = (cycle || '').toLowerCase().startsWith('a');
-  const items = res.items.map((it) => {
-    const monthly = Number(it.monthlyPrice || 0);
-    const annual = Number(it.annualPrice || 0);
-    const price = useAnnual ? annual : monthly;
+  const useAnnual = (cycle === 'Annual');
+  repeater.data = results.items.map(it => {
+    const monthlyPrice = Number(it.monthlyPrice || 0);
+    const annualPrice = Number(it.annualPrice || 0);
+    const annualBaseline = monthlyPrice * 12;
+    const savingsAmount = Math.max(0, annualBaseline - annualPrice);
+    const savingsPercent = annualBaseline > 0 ? Math.round((savingsAmount / annualBaseline) * 100) : 0;
+
+    const selectedPrice = useAnnual ? annualPrice : monthlyPrice;
     let discountText = '';
-    if (useAnnual && monthly > 0 && annual > 0) {
-      const yearlyIfMonthly = monthly * 12;
-      const save = Math.max(0, (yearlyIfMonthly - annual));
-      const pct = yearlyIfMonthly > 0 ? Math.round((save / yearlyIfMonthly) * 100) : 0;
-      if (pct >= 5) discountText = `Save ${pct}%`;
+    if (useAnnual && savingsPercent >= 5) {
+      discountText = `Save ${savingsPercent}%`;
     }
+
     return {
       _id: it._id,
       productImage: it.productImage,
-      planName: it.planName,
+      planName: it.planName || it.title,
       description: it.description,
-      priceDisplay: useAnnual ? `${fmtMoney(price)} / year` : `${fmtMoney(price)} / month`,
+      priceDisplay: `${money(selectedPrice)} / ${useAnnual ? 'year' : 'month'}`,
+      // dual column support
+      monthlyDisplay: `${money(monthlyPrice)} / month`,
+      annualDisplay: `${money(annualPrice)} / year`,
+      savingsAmount,
+      savingsPercent,
       discountText,
+      image2: it.image2
     };
   });
 
-  repeater.data = items;
   repeater.onItemReady(($item, data) => {
-    const img = $item('#planImage');
-    const name = $item('#planName');
-    const desc = $item('#planDescription');
-    const badge = $item('#discountBadge');
-    const price = $item('#planPrice');
-    if (img) { try { img.src = data.productImage; } catch(_){} }
-    if (name) safeText(name, data.planName || '');
-    if (desc) safeText(desc, data.description || '');
-    if (price) safeText(price, data.priceDisplay || '');
-    if (badge) { if (data.discountText) { safeText(badge, data.discountText); safeShow(badge); } else { safeHide(badge); } }
+    try { $item('#planImage').src = data.productImage; } catch(_){}
+    setText($item('#planName'), data.planName || '');
+    setText($item('#planDescription'), data.description || '');
+    // Single price (legacy or if only one column present)
+    setText($item('#planPrice'), data.priceDisplay || '');
+
+    // Dual column prices if elements exist
+    try { setText($item('#monthlyPrice'), data.monthlyDisplay); } catch(_){}
+    try { setText($item('#annualPrice'), data.annualDisplay); } catch(_){}
+    try { if (data.image2) { $item('#discountBadgeimage').src = data.image2; } } catch(_){}
+    if (data.discountText) {
+      setText($item('#discountBadge'), data.discountText);
+      show($item('#discountBadge'));
+      try { show($item('#discountBadgeimage')); } catch(_){}
+    } else {
+      hide($item('#discountBadge'));
+      try { hide($item('#discountBadgeimage')); } catch(_){}
+    }
+
+    // Optional explicit savings amount element
+    try {
+      if (data.savingsAmount > 0) {
+        setText($item('#annualSavings'), `Save ${money(data.savingsAmount)} annually`);
+        show($item('#annualSavings'));
+      } else {
+        hide($item('#annualSavings'));
+      }
+    } catch(_){ }
   });
-  await log('✅ Plans rendered', { count: items.length, cycle });
 }
 
 $w.onReady(async () => {
-  await log('🚀 membersignup: onReady start');
-
-  // Elements (use tolerant resolver for alternate spellings/locations)
-  const elUser = getEl('User');
-  const elEmail = getEl('Email');
-  const elSignUpLink = getEl('signUpLink');
-  const elSubscribeLink = getEl('SubscribeLink');
-  const elVisitDash = getEl('visitDashLink');
-  const elPaySignup = getEl('paySignup');
-  const elAccordionTop = getEl('accordionItem3');
-  const elAccordionMiddle = getEl('accordian1', ['accordion1']);
-  const elAccordionPlans = getEl('accordionItem7');
-  const elBilling = getEl('billingCycleDropdown');
-  const elSubscribeBtn = getEl('subscribe');
-  const elSubscribeInfo = getEl('subscribeInfo');
+  // Elements by ID
+  const elUser = $w('#User');
+  const elEmail = $w('#Email');
+  const elSignUpLink = $w('#signUpLink');
+  const elSubscribeLink = $w('#SubscribeLink');
+  const elVisitDash = $w('#visitDashLink');
+  const elPaySignup = $w('#paySignup');
+  const elPlansBlock = $w('#accordionItem7');
+  const elBilling = $w('#billingCycleDropdown');
+  const elSubscribeBtn = $w('#subscribe');
+  const elSubscribeInfo = $w('#subscribeInfo'); // optional text element
 
   // User context
   const user = wixUsers.currentUser;
-  if (!user?.loggedIn) {
-    await log('⚠️ Not logged in - show minimal UI');
-    safeText(elUser, 'Please log in to continue');
-    safeText(elEmail, '');
-    safeHide(elSignUpLink); safeHide(elSubscribeLink); safeHide(elVisitDash); safeHide(elPaySignup);
+  if (!user || !user.loggedIn) {
+    setText(elUser, 'Please log in to continue');
+    setText(elEmail, '');
+    hide(elSignUpLink); hide(elSubscribeLink); hide(elVisitDash); hide(elPaySignup);
     return;
   }
 
   let email = '';
-  try { email = await user.getEmail(); } catch(e) { await log('⚠️ getEmail failed', { error: e?.message }); }
+  try { email = await user.getEmail(); } catch(_){}
   const profile = await getEmergencyProfile(user.id).catch(() => null);
-  const name = profile?.fullName?.trim() || (email ? email.split('@')[0] : 'Member');
-  safeText(elUser, `${greet()} ${name}`);
-  safeText(elEmail, email || '');
-  await log('👤 user resolved', { userId: user.id, name, email });
+  const name = (profile?.fullName && profile.fullName.trim()) || (email ? email.split('@')[0] : 'Member');
+  setText(elUser, `${greet()} ${name}`);
+  setText(elEmail, email || '');
 
-  // Determine payment + subscription
-  const [agg, detection] = await Promise.all([
-    getUserPaymentStatus(user.id, email).catch((e) => ({ error:e?.message })),
-    detectSignup(user.id, email)
-  ]);
-  await log('📊 aggregate status', agg);
-
+  // Determine sign-up and subscription status (PayFast + Paystack + CMS)
+  const agg = await getUserPaymentStatus(user.id, email).catch(() => ({}));
+  const detection = await detectSignupPayment(user.id, email).catch(() => ({}));
   const signupPaid = !!(agg?.hasSignUpPaid || detection?.paymentDetected);
   const signupAmount = agg?.signupAmount || detection?.amount || 150;
   const signupDate = agg?.signupDate || detection?.paymentDate || new Date();
   const hasSub = !!(agg?.hasSubscription);
 
-  // signUpLink + paySignup buttons
+  // If detection found proof, ensure CMS reflects it
+  if (detection?.paymentDetected) { await ensureCmsSignup(user.id, detection); }
+
+  // a) signUpLink behavior
   if (!signupPaid) {
-    if (elSignUpLink) {
-      safeLabel(elSignUpLink, 'Complete Sign Up'); safeShow(elSignUpLink); safeDisable(elSignUpLink, false);
-      safeOnClick(elSignUpLink, () => openSignupLightbox());
-      await log('🔗 signUpLink enabled for unpaid');
-    }
-    if (elPaySignup) {
-      safeLabel(elPaySignup, 'Pay Sign Up Fee'); safeShow(elPaySignup); safeDisable(elPaySignup, false);
-      safeOnClick(elPaySignup, () => openSignupLightbox());
-      await log('🔘 paySignup enabled for unpaid');
-    }
+    if (elSignUpLink) { setLabel(elSignUpLink, 'Complete Sign Up'); show(elSignUpLink); setEnabled(elSignUpLink, true); onClick(elSignUpLink, openSignup); }
   } else {
-    if (elSignUpLink) {
-      safeLabel(elSignUpLink, `Sign Up fee: ${fmtMoney(signupAmount)} was paid on ${fmtDate(signupDate)}`);
-      safeDisable(elSignUpLink, true); safeShow(elSignUpLink);
-      await log('✅ signUpLink shows paid summary');
-    }
-    if (elPaySignup) { safeLabel(elPaySignup, 'SIGNUP PAID'); safeDisable(elPaySignup, true); safeShow(elPaySignup); }
+    if (elSignUpLink) { setLabel(elSignUpLink, `Sign Up fee: ${money(signupAmount)} was paid on ${dateStr(signupDate)}`); setEnabled(elSignUpLink, false); show(elSignUpLink); }
   }
 
-  // Subscribe links/buttons
+  // paySignup button in top accordion block
+  if (!signupPaid) {
+    if (elPaySignup) { setLabel(elPaySignup, 'Pay Sign Up Fee'); show(elPaySignup); setEnabled(elPaySignup, true); onClick(elPaySignup, openSignup); }
+  } else {
+    if (elPaySignup) { setLabel(elPaySignup, 'SIGNUP PAID'); setEnabled(elPaySignup, false); show(elPaySignup); }
+  }
+
+  // Middle block subscribe button
+  if (elSubscribeBtn) {
+    if (!signupPaid) {
+      hide(elSubscribeBtn);
+      if (elSubscribeInfo) { setText(elSubscribeInfo, 'Please sign up'); show(elSubscribeInfo); }
+    } else {
+      show(elSubscribeBtn);
+      onClick(elSubscribeBtn, async () => { if (elPlansBlock) await expandOrShow(elPlansBlock); });
+      if (elSubscribeInfo) hide(elSubscribeInfo);
+    }
+  }
+
+  // SubscribeLink (if also present)
   if (elSubscribeLink) {
     if (signupPaid && !hasSub) {
-      safeLabel(elSubscribeLink, 'Subscribe to a Plan');
-      safeShow(elSubscribeLink);
-      safeDisable(elSubscribeLink, false);
-      safeOnClick(elSubscribeLink, async () => { if (elAccordionPlans) await safeExpand(elAccordionPlans); });
-      await log('🟢 SubscribeLink enabled (signup paid, no subscription)');
+      setLabel(elSubscribeLink, 'Subscribe to a Plan'); show(elSubscribeLink); setEnabled(elSubscribeLink, true);
+      onClick(elSubscribeLink, async () => { if (elPlansBlock) await expandOrShow(elPlansBlock); });
     } else if (!signupPaid) {
-      if (HIDE_SUBSCRIBE_WHEN_UNPAID) {
-        safeHide(elSubscribeLink);
-        await log('🔒 SubscribeLink hidden (signup unpaid)');
-      } else {
-        safeLabel(elSubscribeLink, 'Please pay the sign-up fee before selecting a subscription plan');
-        safeShow(elSubscribeLink);
-        safeDisable(elSubscribeLink, true);
-        await log('🔒 SubscribeLink disabled with unpaid notice');
-      }
+      hide(elSubscribeLink);
     } else {
-      // signupPaid && hasSub
-      safeHide(elSubscribeLink);
+      hide(elSubscribeLink);
     }
   }
 
-  if (elSubscribeBtn) {
-    if (signupPaid) { safeShow(elSubscribeBtn); safeOnClick(elSubscribeBtn, async () => { if (elAccordionPlans) await safeExpand(elAccordionPlans); }); }
-    else { safeHide(elSubscribeBtn); }
-  }
+  // Dashboard link visible only when subscribed
+  if (elVisitDash) { if (hasSub) { show(elVisitDash); onClick(elVisitDash, () => wixLocation.to('/dashboard')); } else { hide(elVisitDash); } }
 
-  // Dashboard link
-  if (elVisitDash) {
-    if (hasSub) { safeShow(elVisitDash); safeOnClick(elVisitDash, () => wixLocation.to('/dashboard')); }
-    else { safeHide(elVisitDash); }
-  }
-
-  // Informative subscription message (best practice): guide when signup unpaid
-  if (elSubscribeInfo) {
-    if (!signupPaid) {
-      safeText(elSubscribeInfo, 'Complete your once-off sign-up payment to choose a plan.');
-      safeShow(elSubscribeInfo);
-      // Make it actionable: open the data collection lightbox
-      safeOnClick(elSubscribeInfo, () => wixWindow.openLightbox('CollectAddresses'));
-    } else if (signupPaid && !hasSub && hasMembershipTierSelected) {
-      const msg = membershipTier
-        ? `Selected plan: ${membershipTier}. Complete activation to start your membership.`
-        : 'Plan selected. Complete activation to start your membership.';
-      safeText(elSubscribeInfo, msg);
-      safeShow(elSubscribeInfo);
-    } else {
-      safeHide(elSubscribeInfo);
-    }
-  }
-
-  // Plans
-  const cycle = (elBilling && elBilling.value) || 'Monthly';
-  await renderPlans(cycle);
+  // Plans rendering + billing cycle toggle
+  const initialCycle = elBilling && elBilling.value ? elBilling.value : 'Monthly';
+  await renderPlans(initialCycle);
   if (elBilling) { elBilling.onChange(async () => { await renderPlans(elBilling.value || 'Monthly'); }); }
-
-  await log('✅ membersignup: initialized');
 });
-
