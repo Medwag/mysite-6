@@ -284,7 +284,21 @@ export async function createPayFastSignupParams(userId, userEmail, amount = 149.
         
         const { merchantId, merchantKey } = await getPayFastCredentials();
         const paymentReference = generatePayFastSignupReference(userId, userEmail);
-        
+        // Load profile for subscriber details
+        let profile = null;
+        try {
+            const wixData = await import('wix-data');
+            const q = await wixData.query('Emergency_Profiles')
+                .eq('_owner', userId)
+                .limit(1)
+                .find({ suppressAuth: true });
+            profile = q.items[0] || null;
+        } catch (_) {}
+        const subscriberName = profile?.fullName || '';
+        const subscriberPhone = profile?.phone || profile?.signUpPhoneNumber || profile?.whatsAppNumber || '';
+        const homeAddress = profile?.homeAddress || profile?.address1Input || '';
+        const deliveryAddress = profile?.deliveryAddress || '';
+
         const params = {
             // Merchant details
             merchant_id: merchantId,
@@ -292,17 +306,19 @@ export async function createPayFastSignupParams(userId, userEmail, amount = 149.
             
             // Payment details
             amount: amount.toFixed(2),
-            item_name: "EmergiTag Sign Up Fee",
-            item_description: "One-time registration fee for EmergiTag emergency profile service",
+            item_name: "Sign Up Fee",
+            item_description: "Once off Payment of Emergitag.me Sign up Fee",
             
             // Customer details
+            name_first: subscriberName ? String(subscriberName).split(' ')[0] : '',
             email_address: userEmail,
+            cell_number: subscriberPhone,
             email_confirmation: 1,
-            confirmation_address: userEmail,
+            confirmation_address: 'emergitag@gmail.com',
             
             // PayFast URLs
             return_url: "https://www.emergitag.me/signup-success",
-            cancel_url: "https://www.emergitag.me/signup-cancelled",
+            cancel_url: "https://www.emergitag.me/cancel",
             notify_url: "https://www.emergitag.me/_functions/payfast-itn",
             
             // Custom fields
@@ -313,6 +329,8 @@ export async function createPayFastSignupParams(userId, userEmail, amount = 149.
             custom_str4: "EmergiTag",
             custom_str5: new Date().toISOString()
         };
+        if (homeAddress) params.custom_str6 = String(homeAddress).substring(0, 254);
+        if (deliveryAddress) params.custom_str7 = String(deliveryAddress).substring(0, 254);
         
         console.log('[PayFast Utils] ✅ PayFast signup parameters created');
         return params;

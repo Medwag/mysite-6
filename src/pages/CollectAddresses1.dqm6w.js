@@ -744,6 +744,11 @@ $w.onReady(async () => {
                 deliveryAddress = null;
             }
 
+            // Determine email (prefer membership email over typed value)
+            let membershipEmail = '';
+            try { membershipEmail = await user.getEmail(); } catch {}
+            const email = membershipEmail || inputEmailVal;
+
             // --- Basic validation with specific error messages ---
             const missingFields = [];
             if (!fullName) missingFields.push('Full Name');
@@ -751,16 +756,11 @@ $w.onReady(async () => {
             if (!phone) missingFields.push('Phone');
             if (!homeAddress) missingFields.push('Home Address');
             if (!deliveryAddress) missingFields.push('Delivery Address');
-            
+
             if (missingFields.length > 0) {
                 const fieldList = missingFields.join(', ');
                 throw new Error(`Please fill in the following required fields: ${fieldList}`);
             }
-
-            // Always prefer membership email over typed value
-            let membershipEmail = '';
-            try { membershipEmail = await user.getEmail(); } catch {}
-            const email = membershipEmail || inputEmailVal;
 
             // --- Save profile (write both canonical and requested CMS fields) ---
             const { savedProfile } = await saveEmergencyProfile({

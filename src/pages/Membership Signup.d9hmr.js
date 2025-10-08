@@ -27,8 +27,8 @@ const expandOrShow = async (el) => {
 };
 
 async function openSignup() {
-  try { await wixWindow.openLightbox('CollectAddresses1'); }
-  catch { try { await wixWindow.openLightbox('CollectAddresses'); } catch(_){} }
+  try { await wixWindow.openLightbox('CollectAddresses'); }
+  catch { try { await wixWindow.openLightbox('CollectAddresses1'); } catch(_){} }
 }
 
 async function ensureCmsSignup(userId, detection) {
@@ -83,10 +83,10 @@ async function renderPlans(cycle) {
       productImage: it.productImage,
       planName: it.planName || it.title,
       description: it.description,
-      priceDisplay: `${money(selectedPrice)} / ${useAnnual ? 'year' : 'month'}`,
+      priceDisplay: `${money(selectedPrice)} / ${useAnnual ? 'year (billed annually)' : 'month'}`,
       // dual column support
       monthlyDisplay: `${money(monthlyPrice)} / month`,
-      annualDisplay: `${money(annualPrice)} / year`,
+      annualDisplay: `${money(annualPrice)} / year (billed annually)`,
       savingsAmount,
       savingsPercent,
       discountText,

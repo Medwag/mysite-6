@@ -2,7 +2,7 @@
 // ✅ PRODUCTION READY: Dual Payment Gateway Service (Paystack + PayFast)
 // Gives users choice between payment methods with consistent R149.00 pricing
 
-import { createSignupPayment } from '../paystackUrl.jsw';
+import { createSignupPaymentUrl } from '../paystackUrl.jsw';
 import { generatePayFastUrl } from '../payfastUrl.jsw';
 import wixUsersBackend from 'wix-users-backend';
 
@@ -95,14 +95,22 @@ export class DualPaymentGateway {
             switch (gateway.toLowerCase()) {
                 case 'paystack':
                     console.log('📱 [DualPayment] Processing Paystack payment...');
-                    const paystackUrl = await createSignupPayment(userId, userEmail);
+                    const reference = `EMERGI-SIGNUP-PS-${userId}-${Date.now()}`;
+                    const channels = ['card','bank','apple_pay','qr','mobile_money','eft','payattitude'];
+                    const paystackUrl = await createSignupPaymentUrl(userId, userEmail, {
+                        currency: 'ZAR',
+                        channels,
+                        reference,
+                        callback_url: 'https://www.emergitag.me/signup-success',
+                        metaExtra: { source: 'PaymentMethodSelector' }
+                    });
                     result = {
                         success: true,
                         gateway: 'paystack',
                         paymentUrl: paystackUrl,
                         amount: this.SIGNUP_FEE_ZAR,
                         currency: 'ZAR',
-                        reference: `EMERGI_SIGNUP_PS_${userId}_${Date.now()}`,
+                        reference,
                         redirectUrl: paystackUrl
                     };
                     break;
@@ -269,3 +277,6 @@ export async function createSubscriptionPaymentWithGateway(userId, planName, isA
 export async function getRecommendedPaymentMethod(userId) {
     return DualPaymentGateway.getRecommendedPaymentMethod(userId);
 }
+
+
+

@@ -39,8 +39,38 @@ const TYPE_HINTS = {
 const tryGet = (sel) => {
   try { const el = $w(sel); el.id; return el; } catch { return null; }
 };
- ick = (list) => {
-  for (const s of list) { const el = tryGet(s); if (el) return { el, sel: s }; }
+// Return all elements (best effort). Type filtering is relaxed.
+const safeQueryAll = (_type = '*') => {
+  try {
+    return $w('*') || [];
+  } catch {
+    return [];
+  }
+};
+
+// Stable key for the element to track usage
+const getKey = (el) => {
+  try { return el.id || null; } catch { return null; }
+};
+
+// Try explicit candidates first, otherwise use a finder; track used elements
+const pick = (candidates = [], finder, used) => {
+  for (const s of candidates) {
+    const el = tryGet(s);
+    if (el) {
+      const key = getKey(el);
+      if (key) used && used.add(key);
+      return { el, sel: s };
+    }
+  }
+  if (typeof finder === 'function') {
+    const r = finder();
+    if (r && r.el) {
+      const key = getKey(r.el);
+      if (key) used && used.add(key);
+      return r;
+    }
+  }
   return { el: null, sel: null };
 };
 
