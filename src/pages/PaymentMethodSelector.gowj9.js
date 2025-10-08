@@ -8,6 +8,7 @@ import wixUsers from 'wix-users';
 import wixLocation from 'wix-location';
 import { createPaystackPayment } from 'backend/paystack.jsw';
 import { createPayfastPayment } from 'backend/payfast.jsw';
+import wixWindow from 'wix-window';
 
 let selectedGateway = null;
 let paymentMethods = [];
@@ -303,7 +304,7 @@ async function handlePaymentSelection() {
         
         // Create payment with selected gateway
         const userId = lightboxContext.userId || user.id;
-        const email = lightboxContext.email || user.email;
+        const email = lightboxContext.email || (await user.getEmail().catch(() => ''));
         
         console.log(`Creating payment with ${selectedGateway} for user ${userId}`);
         const paymentResult = await createSignupPaymentWithGateway(userId, selectedGateway, email);

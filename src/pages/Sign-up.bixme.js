@@ -15,40 +15,71 @@ const CANDIDATES = {
   status:        ['#membersStatus', '#statusText', '#status', '#statusLabel']
 };
 
+const TEXT_HINTS = {
+  signup:        ['sign up', 'signup'],
+  subscribe:     ['subscribe', 'membership', 'plan'],
+  dashboard:     ['dashboard', 'home'],
+  form:          ['form', 'sign', 'details'],
+  paystack:      ['paystack'],
+  payfast:       ['payfast', 'pay fast'],
+  status:        ['status', 'loading', 'membership']
+};
+
+const TYPE_HINTS = {
+  signup:    ['Button'],
+  subscribe: ['Button'],
+  dashboard: ['Button'],
+  form:      ['Box', 'Container', 'Strip', 'Group'],
+  paystack:  ['Button'],
+  payfast:   ['Button'],
+  status:    ['Text']
+};
+
 /* ---------- tiny helpers ---------- */
 const tryGet = (sel) => {
   try { const el = $w(sel); el.id; return el; } catch { return null; }
 };
-
-// Resolve by direct ID first, then scan all elements for case-insensitive/partial ID matches
-const pick = (list) => {
-  // 1) direct attempts with provided selectors
-  for (const s of list) {
-    const el = tryGet(s);
-    if (el) return { el, sel: s };
-  }
-  // 2) fallback: scan $w('*') for ids that equal or include any candidate (case-insensitive)
-  try {
-    const all = $w('*');
-    const norm = (x) => String(x || '').replace(/^#/,'').toLowerCase();
-    const candidates = list.map(norm);
-    for (const el of all) {
-      try {
-        const id = norm(el.id);
-        if (!id) continue;
-        // exact first
-        if (candidates.some(c => id === c)) return { el, sel: `#${el.id}` };
-      } catch {}
-    }
-    for (const el of all) {
-      try {
-        const id = norm(el.id);
-        if (!id) continue;
-        if (candidates.some(c => id.includes(c))) return { el, sel: `#${el.id}` };
-      } catch {}
-    }
-  } catch {}
+ ick = (list) => {
+  for (const s of list) { const el = tryGet(s); if (el) return { el, sel: s }; }
   return { el: null, sel: null };
+};
+
+const findByText = (types = [], hints = [], used) => {
+  if (!types.length || !hints.length) return null;
+  const loweredHints = hints.map(h => h.toLowerCase());
+  for (const type of types) {
+    const list = safeQueryAll(type);
+    for (const el of list) {
+      if (!el) continue;
+      const key = getKey(el);
+      if (key && used.has(key)) continue;
+      const label = [el.label, el.text, el.placeholder].filter(Boolean).join(' ').toLowerCase();
+      if (!label) continue;
+      if (loweredHints.some(h => label.includes(h))) {
+        return { el, sel: `${type}[text*="${hints[0]}"]`, via: 'text' };
+      }
+    }
+  }
+  return null;
+};
+
+const findByIdSubstring = (hints = [], used) => {
+  if (!hints.length) return null;
+  const lowered = hints.map(h => h.toLowerCase());
+  const loweredTight = hints.map(h => h.toLowerCase().replace(/\s+/g, ''));
+  const all = safeQueryAll('*');
+  for (const el of all) {
+    if (!el) continue;
+    const key = getKey(el);
+    if (key && used.has(key)) continue;
+    const id = (el.id || '').toLowerCase();
+    if (!id) continue;
+    const idTight = id.replace(/\s+/g, '');
+    if (lowered.some(h => id.includes(h)) || loweredTight.some(h => idTight.includes(h))) {
+      return { el, sel: `#${el.id}`, via: 'id-partial' };
+    }
+  }
+  return null;
 };
 const safeShow = (el) => { try { el.show(); } catch {} };
 const safeHide = (el) => { try { el.hide(); } catch {} };
@@ -68,26 +99,43 @@ const safeExpandSlideLeft = async (el) => {
 $w.onReady(async () => {
   console.log('🔎 Sign-up page booting… resolving elements…');
 
-  // Resolve all targets from candidate IDs (works even if you changed names in Editor)
-  const UI = {
-    signup:    pick(CANDIDATES.signup),
-    subscribe: pick(CANDIDATES.subscribe),
-    dashboard: pick(CANDIDATES.dashboard),
-    form:      pick(CANDIDATES.form),
-    paystack:  pick(CANDIDATES.paystack),
-    payfast:   pick(CANDIDATES.payfast),
-    status:    pick(CANDIDATES.status)
+  const resolveAll = () => {
+    const used = new Set();
+    const resolve = (key) => pick(
+      CANDIDATES[key],
+      () => findByText(TYPE_HINTS[key], TEXT_HINTS[key], used) || findByIdSubstring(TEXT_HINTS[key], used),
+      used
+    );
+
+    return {
+      signup:    resolve('signup'),
+      subscribe: resolve('subscribe'),
+      dashboard: resolve('dashboard'),
+      form:      resolve('form'),
+      paystack:  resolve('paystack'),
+      payfast:   resolve('payfast'),
+      status:    resolve('status')
+    };
   };
+
+  let UI = resolveAll();
+  let resolvedCount = Object.values(UI).filter(x => !!x.el).length;
+
+  if (resolvedCount === 0) {
+    console.warn('⚠️ No target elements resolved on first attempt. Retrying after 1s in case elements load late…');
+    await new Promise((res) => setTimeout(res, 1000));
+    UI = resolveAll();
+    resolvedCount = Object.values(UI).filter(x => !!x.el).length;
+  }
 
   // Debug: print what we found / missed
   Object.entries(UI).forEach(([k, v]) => {
     console.log(v.el
-      ? `✅ resolved ${k} → ${v.sel}`
+      ? `✅ resolved ${k} → ${v.sel}${v.via ? ` (${v.via})` : ''}`
       : `❌ missing ${k} → tried: ${CANDIDATES[k].join(', ')}`);
   });
 
   // If literally everything is missing, the code is not attached to THIS page
-  const resolvedCount = Object.values(UI).filter(x => !!x.el).length;
   if (resolvedCount === 0) {
     console.error('🚨 No elements resolved. This code is likely not attached to the Sign-up page or the page has no elements (wrong page).');
     return;
