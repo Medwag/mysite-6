@@ -240,7 +240,12 @@ async function setupMultiplePaymentMethods() {
     if (paystackMethod) {
         $w('#paystackButton').show();
         $w('#paystackButton').label = `${paystackMethod.name} - ${paystackMethod.description}`;
-        $w('#paystackButton').onClick(() => selectPaymentMethod('paystack', paystackMethod));
+        $w('#paystackButton').onClick(() => {
+            const paystackMethod = paymentMethods.find(m => m.id === 'paystack');
+            if (paystackMethod) {
+                selectPaymentMethod('paystack', paystackMethod);
+            }
+        });
         
         // Show Paystack details
         $w('#paystackDetails').text = `✓ ${paystackMethod.processingTime} • ${paystackMethod.supported.join(', ')}`;
@@ -252,7 +257,7 @@ async function setupMultiplePaymentMethods() {
     if (payfastMethod) {
         $w('#payfastButton').show();
         $w('#payfastButton').label = `${payfastMethod.name} - ${payfastMethod.description}`;
-        $w('#payfastButton').onClick(() => selectPaymentMethod('payfast', payfastMethod));
+        $w('#payfastButton').onClick(() => processPaymentImmediate('payfast'));
         
         // Show PayFast details
         $w('#payfastDetails').text = `✓ ${payfastMethod.processingTime} • ${payfastMethod.supported.join(', ')}`;
@@ -459,4 +464,24 @@ export function selectPayfast() {
 
 
 
+
+
+
+async function processPaymentImmediate(gateway) {
+    try {
+        const user = wixUsers.currentUser;
+        const userId = lightboxContext.userId || user.id;
+        const email = lightboxContext.email || (await user.getEmail().catch(() => ''));
+        let payUrl = '';
+        if (gateway === 'paystack') {
+            payUrl = await createPaystackPayment(userId, email);
+        } else if (gateway === 'payfast') {
+            payUrl = await createPayfastPayment(userId, email);
+        }
+        if (!payUrl) throw new Error('Could not create payment URL');
+        wixLocation.to(payUrl);
+    } catch (e) {
+        showError(e?.message || 'Could not start payment');
+    }
+}
 
