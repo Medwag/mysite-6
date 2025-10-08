@@ -19,6 +19,9 @@ const hide = (id) => { try { $w(id).hide(); } catch(_){} };
 const text = (id, t) => { try { $w(id).text = String(t); } catch(_){} };
 const label = (id, t) => { try { $w(id).label = String(t); } catch(_){} };
 const enable = (id, v=true) => { try { $w(id).enable(); if(!v) $w(id).disable(); } catch(_){} };
+const setBg = (id, color) => { try { $w(id).style.backgroundColor = color; } catch(_){} };
+const setBorder = (id, color, width = '2px') => { try { $w(id).style.borderColor = color; $w(id).style.borderWidth = width; } catch(_){} };
+const setOpacity = (id, value = 1) => { try { $w(id).style.opacity = value; } catch(_){} };
 
 function hideAll() {
   ['#paymentContainer','#headerText','#amountText','#selectionText','#paystackButton','#payfastButton','#paystackDetails','#payfastDetails','#methodDetailsContainer','#selectedMethodText','#continueButton','#cancelButton','#errorText','#loadingText']
@@ -55,6 +58,33 @@ function selectMethod(method) {
   label('#continueButton', `Pay R149.00 via ${method.name}`);
   show('#continueButton'); enable('#continueButton', true);
   try { hide('#chooseMethodPrompt'); } catch(_){}
+  try { text('#methodName', method.name); show('#methodName'); } catch(_){}
+  if (method.id === 'paystack') {
+    setBg('#paystackButton', '#0084ff');
+    setBg('#payfastButton', '#e0e0e0');
+  } else if (method.id === 'payfast') {
+    setBg('#payfastButton', '#ff6b35');
+    setBg('#paystackButton', '#e0e0e0');
+  }
+  try { applySelectionStyles(); } catch(_) {}
+}
+
+function applySelectionStyles() {
+  if (selectedGateway === 'paystack') {
+    setBorder('#paystackButton', '#006bd1', '2px');
+    setOpacity('#paystackButton', 1);
+    setBorder('#payfastButton', '#cccccc', '1px');
+    setOpacity('#payfastButton', 0.85);
+    try { show('#paystackDetails'); } catch(_){}
+    try { hide('#payfastDetails'); } catch(_){}
+  } else if (selectedGateway === 'payfast') {
+    setBorder('#payfastButton', '#e05321', '2px');
+    setOpacity('#payfastButton', 1);
+    setBorder('#paystackButton', '#cccccc', '1px');
+    setOpacity('#paystackButton', 0.85);
+    try { show('#payfastDetails'); } catch(_){}
+    try { hide('#paystackDetails'); } catch(_){}
+  }
 }
 
 async function handleContinue() {
@@ -104,6 +134,8 @@ $w.onReady(async () => {
     text('#SubscriberHomeAddress', String(home));
     text('#SubscriberDeliveryAddress', String(delivery));
     show('#SubscriberName'); show('#SubscriberEmail'); show('#SubscriberPhoneNumber'); show('#SubscriberHomeAddress'); show('#SubscriberDeliveryAddress');
+    try { show('#SubscriberDetails'); } catch(_){}
+    try { text('#methodName', 'Choose a payment method to continue'); show('#methodName'); } catch(_){}
   } catch (_){ }
 
   try {
@@ -125,6 +157,8 @@ $w.onReady(async () => {
       text('#payfastDetails', `${pf.processingTime} • ${pf.supported?.join(', ') || ''}`); show('#payfastDetails');
       try { $w('#payfastButton').onClick(() => selectMethod(pf)); } catch(_){}
     }
+    try { hide('#paystackDetails'); } catch(_){}
+    try { hide('#payfastDetails'); } catch(_){}
 
     // Continue handler (stay hidden/disabled until a method is selected)
     try { $w('#continueButton').onClick(() => handleContinue()); } catch(_){}
