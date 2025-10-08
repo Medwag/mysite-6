@@ -54,6 +54,7 @@ function selectMethod(method) {
   show('#selectedMethodText');
   label('#continueButton', `Pay R149.00 via ${method.name}`);
   show('#continueButton'); enable('#continueButton', true);
+  try { hide('#chooseMethodPrompt'); } catch(_){}
 }
 
 async function handleContinue() {
@@ -81,6 +82,8 @@ $w.onReady(async () => {
   text('#headerText', 'Choose Your Payment Method'); show('#headerText');
   text('#amountText', 'Signup Fee: R149.00'); show('#amountText');
   text('#selectionText', 'Select your preferred payment method:'); show('#selectionText');
+  // Optional hint if present
+  try { text('#chooseMethodPrompt', 'Choose a payment method to continue'); show('#chooseMethodPrompt'); } catch(_){}
   text('#loadingText', 'Loading payment options...'); show('#loadingText');
   show('#cancelButton'); try { $w('#cancelButton').onClick(() => wixWindow.lightbox.close()); } catch(_){}
 

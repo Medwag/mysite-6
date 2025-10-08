@@ -58,7 +58,7 @@ export async function logProfileChange(profile, action = "update", reason = "aut
     };
     
     try {
-        await wixData.insert("Emergency_Profiles_Backup", backupEntry);
+        await wixData.insert("Emergency_Profiles_Backup", backupEntry, { suppressAuth: true });
         console.log(`✅ Backup saved for profile ${profileId}`);
     } catch (err) {
         console.error(`❌ Backup insert failed for profile ${profileId}:`, err);
@@ -73,7 +73,7 @@ export async function logProfileChange(profile, action = "update", reason = "aut
         dataSnapshot: JSON.stringify(profile, null, 2)
     };
     try {
-        await wixData.insert("Emergency_Profiles_Audit", auditEntry);
+        await wixData.insert("Emergency_Profiles_Audit", auditEntry, { suppressAuth: true });
         console.log(`📜 Audit log written for profile ${profileId} (${action})`);
     } catch (err) {
         console.warn(`⚠️ Audit logging skipped for profile ${profileId} (${action}): ${err.message}`);
