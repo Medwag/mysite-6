@@ -1,4 +1,6 @@
 // membersignup page logic
+  const hasMembershipTierSelected = !!(agg?.hasMembershipTierSelected);
+  const membershipTier = agg?.membershipTier || \"\";
 // Adds greeting, email display, signup/subscription gating, and plan rendering with logging
 
 import wixUsers from 'wix-users';
@@ -9,6 +11,7 @@ import wixData from 'wix-data';
 import { getUserPaymentStatus } from 'backend/status.jsw';
 import { detectSignupPayment, detectActiveSubscription } from 'backend/core/payment-service.jsw';
 import { getEmergencyProfile, updateEmergencyProfile } from 'backend/core/profile-service.jsw';
+import { setSignupPaid } from 'backend/core/signup-utils.jsw';
 import { sendDiscordLog } from 'backend/logger.jsw';
 
 const log = async (m, extra = null) => {
@@ -78,8 +81,22 @@ async function ensureCmsFromDetection(userId, email, detection) {
 async function detectSignup(userId, email) {
   const detection = await detectSignupPayment(userId, email).catch((e) => ({ success:false, error:e?.message }));
   await log('🔎 detectSignup result', detection);
+  try { await ensureCmsFromDetectionNormalized(userId, email, detection); } catch(_) {}
   await ensureCmsFromDetection(userId, email, detection);
   return detection;
+}
+
+// Use normalization helper to set consistent signup flags and audit fields
+async function ensureCmsFromDetectionNormalized(userId, email, detection) {
+  if (!detection?.paymentDetected) return;
+  const opts = {
+    reference: detection.reference,
+    gateway: detection.provider,
+    amount: detection.amount,
+    date: detection.paymentDate ? new Date(detection.paymentDate) : new Date()
+  };
+  await setSignupPaid(userId, opts);
+  await log('dY"S normalized signup flags via helper', opts);
 }
 
 async function findPlansRepeater() {
@@ -247,6 +264,12 @@ $w.onReady(async () => {
       safeShow(elSubscribeInfo);
       // Make it actionable: open the data collection lightbox
       safeOnClick(elSubscribeInfo, () => wixWindow.openLightbox('CollectAddresses'));
+    } else if (signupPaid && !hasSub && hasMembershipTierSelected) {
+      const msg = membershipTier
+        ? `Selected plan: ${membershipTier}. Complete activation to start your membership.`
+        : 'Plan selected. Complete activation to start your membership.';
+      safeText(elSubscribeInfo, msg);
+      safeShow(elSubscribeInfo);
     } else {
       safeHide(elSubscribeInfo);
     }
