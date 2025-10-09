@@ -1,4 +1,4 @@
-// membersignup page logic (clean implementation)
+﻿// membersignup page logic (clean implementation)
 import wixUsers from 'wix-users';
 import wixWindow from 'wix-window';
 import wixLocation from 'wix-location';
@@ -227,7 +227,7 @@ $w.onReady(async () => {
 
   // quick audit to console
   Object.entries(UI).forEach(([k, v]) => {
-    console.log(v.el ? `✓ resolved ${k} -> ${v.sel}${v.via?` (${v.via})`:''}` : `✗ missing ${k}`);
+    console.log(v.el ? `âœ“ resolved ${k} -> ${v.sel}${v.via?` (${v.via})`:''}` : `âœ— missing ${k}`);
   });
 
   // Send backend Discord audit snapshot (best effort, non-blocking)
@@ -283,6 +283,11 @@ $w.onReady(async () => {
     if (UI.paySignup.el) { setLabel(UI.paySignup.el, 'Pay Sign Up Fee'); show(UI.paySignup.el); setEnabled(UI.paySignup.el, true); onClick(UI.paySignup.el, () => openSignup(user.id, email)); }
   } else {
     if (UI.paySignup.el) { setLabel(UI.paySignup.el, 'SIGNUP PAID'); setEnabled(UI.paySignup.el, false); show(UI.paySignup.el); }
+  }
+
+  // If unpaid and no CTA present, auto-start payment to avoid dead-end UX
+  if (!signupPaid && !UI.signUpLink.el && !UI.paySignup.el) {
+    try { setTimeout(() => openSignup(user.id, email), 300); } catch (_) {}
   }
 
   // Middle block subscribe button
