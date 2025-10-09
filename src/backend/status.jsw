@@ -54,28 +54,40 @@ export async function getUserPaymentStatus(userId, email) {
     }
 
     // --- Check PaystackTransactions collection ---
-    const paystack = await wixData.query("PaystackTransactions")
-      .eq("profileOwner", userId)
-      .limit(1)
-      .find({ suppressAuth: true });
-    if (paystack.items.length > 0) {
-      status.hasSignUpPaid = true;
-      status.signupSource = "Paystack";
-      status.signupDate = paystack.items[0].processedAt;
-      status.signupAmount = paystack.items[0].amount || 150.0;
-    }
+    // Collection is written by paystackUrl.jsw with fields: userId, amount, status, createdAt, reference
+    // Align query to use userId (not profileOwner). Prefer processedAt if present, else createdAt.
+    try {
+      const paystack = await wixData
+        .query("PaystackTransactions")
+        .eq("userId", userId)
+        .descending("createdAt")
+        .limit(1)
+        .find({ suppressAuth: true });
+      if (paystack.items.length > 0) {
+        const tx = paystack.items[0];
+        status.hasSignUpPaid = true;
+        status.signupSource = "Paystack";
+        status.signupDate = tx.processedAt || tx.createdAt || null;
+        status.signupAmount = tx.amount || 150.0;
+      }
+    } catch (_) {}
 
     // --- Check PayFast_Transactions collection ---
-    const payfast = await wixData.query("PayFast_Transactions")
-      .eq("profileOwner", userId)
-      .limit(1)
-      .find({ suppressAuth: true });
-    if (payfast.items.length > 0) {
-      status.hasSignUpPaid = true;
-      status.signupSource = "PayFast";
-      status.signupDate = payfast.items[0].processedAt;
-      status.signupAmount = payfast.items[0].amount || 150.0;
-    }
+    try {
+      const payfast = await wixData
+        .query("PayFast_Transactions")
+        .eq("profileOwner", userId)
+        .descending("processedAt")
+        .limit(1)
+        .find({ suppressAuth: true });
+      if (payfast.items.length > 0) {
+        const tx = payfast.items[0];
+        status.hasSignUpPaid = true;
+        status.signupSource = "PayFast";
+        status.signupDate = tx.processedAt || null;
+        status.signupAmount = tx.amount || 150.0;
+      }
+    } catch (_) {}
 
     return status;
   } catch (err) {

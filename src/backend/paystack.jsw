@@ -29,8 +29,10 @@ export async function createPaystackPayment(userId, email) {
 
   const payload = {
     email,
-    amount: 15000, // 150 ZAR in kobo
-    metadata: { userId, purpose: "signup_fee" },
+    // Standardize signup fee to R149.00 across the stack
+    amount: 14900, // ZAR in kobo
+    // Include both keys for compatibility across detectors and webhooks
+    metadata: { userId, purpose: "signup_fee", transaction_type: "signup_fee", intent: "signup_payment" },
     callback_url: `${getSiteUrl()}/signup-success`
   };
 

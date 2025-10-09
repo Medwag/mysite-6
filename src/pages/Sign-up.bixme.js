@@ -1,6 +1,7 @@
 // pages/Sign-up.js  (make sure this is the Sign-up page code, not Site or Success)
 import wixUsers from 'wix-users';
 import wixLocation from 'wix-location';
+import wixWindow from 'wix-window';
 import { createPaystackPayment } from 'backend/paystack.jsw';
 import { createPayfastPayment } from 'backend/payfast.jsw';
 import { getUserPaymentStatus } from 'backend/status.jsw';
@@ -243,6 +244,11 @@ $w.onReady(async () => {
   if (UI.paystack.el) {
     UI.paystack.el.onClick(async () => {
       try {
+        // Prefer unified lightbox selector; fallback to direct Paystack init
+        try {
+          await wixWindow.openLightbox('PaymentMethodSelector', { userId: user.id, email });
+          return;
+        } catch (_) {}
         UI.status.el && safeText(UI.status.el, 'Redirecting to Paystack…');
         const url = await createPaystackPayment(user.id, email);
         wixLocation.to(url);
@@ -256,6 +262,11 @@ $w.onReady(async () => {
   if (UI.payfast.el) {
     UI.payfast.el.onClick(async () => {
       try {
+        // Prefer unified lightbox selector; fallback to direct PayFast init
+        try {
+          await wixWindow.openLightbox('PaymentMethodSelector', { userId: user.id, email });
+          return;
+        } catch (_) {}
         UI.status.el && safeText(UI.status.el, 'Redirecting to PayFast…');
         const url = await createPayfastPayment(user.id, email);
         wixLocation.to(url);

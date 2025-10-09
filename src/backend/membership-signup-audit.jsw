@@ -1,0 +1,46 @@
+// backend/membership-signup-audit.jsw
+// Logs Membership Signup page UI element audit snapshots to Discord
+
+import { sendDiscordLog } from 'backend/logger.jsw';
+
+function formatList(items) {
+  if (!items || items.length === 0) return '-';
+  return items
+    .map((it) => (typeof it === 'string' ? it : `${it.key}${it.via ? ` (${it.via})` : ''}`))
+    .join(', ');
+}
+
+/**
+ * Post a compact audit snapshot to Discord
+ * @param {string} userId
+ * @param {string} email
+ * @param {string} pageName
+ * @param {{ resolved: Array<{key:string, sel?:string, via?:string}>, missing: string[] }} audit
+ */
+export async function logMembershipSignupAudit(userId, email, pageName = 'Membership Signup', audit = {}) {
+  try {
+    const resolved = Array.isArray(audit.resolved) ? audit.resolved : [];
+    const missing = Array.isArray(audit.missing) ? audit.missing : [];
+
+    const header = `dY"S UI Audit • ${pageName}`;
+    const idLine = `User: ${userId || 'guest'} • Email: ${email || '-'} • ${new Date().toISOString()}`;
+    const summary = `Found: ${resolved.length} • Missing: ${missing.length}`;
+    const foundList = formatList(resolved.map(r => ({ key: r.key, via: r.via })));
+    const missingList = formatList(missing);
+
+    const msg = [
+      header,
+      idLine,
+      summary,
+      `Found: ${foundList}`,
+      `Missing: ${missingList}`
+    ].join('\n');
+
+    await sendDiscordLog(msg);
+    return { success: true };
+  } catch (err) {
+    // Best-effort: avoid throwing back to the page
+    return { success: false, error: err.message };
+  }
+}
+
